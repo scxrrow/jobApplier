@@ -1,0 +1,399 @@
+from __future__ import annotations
+
+import json
+import shutil
+from pathlib import Path
+
+import typer
+from rich.console import Console
+from rich.table import Table
+
+from . import db
+from .config import settings
+from .cv import (
+    EXAMPLE_CV_PATH,
+    extract_master_cv,
+    html_to_text,
+    load_master_cv,
+    save_master_cv,
+)
+from .filters import FilterRules
+from .llm import LLMError, build_client
+from .models import Status
+from .scoring import score_offer
+from .sources import FranceTravailClient, FranceTravailError, parse_offer
+
+app = typer.Typer(add_completion=False, help="Pipeline de candidature automatisee.")
+cv_app = typer.Typer(help="Gestion du CV maitre (data/master-cv.json).")
+app.add_typer(cv_app, name="cv")
+console = Console()
+
+
+def _llm_client():
+    """Instancie le backend LLM, avec un message clair si la config est incomplete."""
+    try:
+        return build_client(settings)
+    except LLMError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def fetch(
+    jours: int = typer.Option(7, help="Ne recuperer que les offres publiees depuis N jours."),
+    max_par_requete: int = typer.Option(600, help="Plafond de resultats par combinaison."),
+    dry_run: bool = typer.Option(False, help="Afficher sans ecrire en base."),
+) -> None:
+    """Recupere les offres France Travail et les stocke en base."""
+    try:
+        settings.require_ft_credentials()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    rules = FilterRules(
+        departements=settings.departements,
+        mots_cles=settings.mots_cles,
+        alternance_only=settings.jobot_alternance_only,
+    )
+
+    offers, raws = [], {}
+    seen: set[str] = set()
+
+    with FranceTravailClient(settings.ft_client_id, settings.ft_client_secret) as client:
+        # Une requete par (departement x mot-cle) : l'API ne fait pas de OU
+        # sur les mots-cles, on croise donc nous-memes puis on dedoublonne.
+        combos = [
+            (dep, kw)
+            for dep in (settings.departements or [None])
+            for kw in (settings.mots_cles or [None])
+        ]
+
+        for dep, kw in combos:
+            label = f"dep={dep or '*'} kw={kw or '*'}"
+            try:
+                raw_offers = client.search(
+                    mots_cles=kw,
+                    departement=dep,
+                    alternance=settings.jobot_alternance_only,
+                    publiee_depuis=jours,
+                    max_results=max_par_requete,
+                )
+            except FranceTravailError as exc:
+                console.print(f"[yellow]{label} : {exc}[/yellow]")
+                continue
+
+            fresh = 0
+            for raw in raw_offers:
+                offer = parse_offer(raw)
+                if offer.id in seen:
+                    continue
+                seen.add(offer.id)
+                offers.append(offer)
+                raws[offer.id] = raw
+                fresh += 1
+
+            console.print(f"  {label:<45} {len(raw_offers):>4} recues, {fresh:>4} uniques")
+
+    console.print(f"\n[bold]{len(offers)}[/bold] offres uniques recuperees.")
+
+    if dry_run:
+        console.print("[dim]--dry-run : rien n'a ete ecrit.[/dim]")
+        return
+
+    conn = db.connect(settings.db_path)
+    new, updated, unchanged = db.upsert_offers(conn, offers, raws)
+    console.print(
+        f"Base : [green]{new} nouvelles[/green], "
+        f"[yellow]{updated} mises a jour[/yellow], {unchanged} inchangees."
+    )
+
+    # Filtrage a regles sur tout ce qui est en attente de traitement.
+    rows = conn.execute("SELECT * FROM offers WHERE status = ?", (str(Status.NEW),)).fetchall()
+    rejected = 0
+    for row in rows:
+        offer = _offer_from_row(row)
+        reason = rules.check(offer)
+        if reason:
+            db.mark_filtered(conn, offer.id, reason)
+            rejected += 1
+    conn.commit()
+
+    kept = len(rows) - rejected
+    console.print(f"Filtres : [red]{rejected} ecartees[/red], [green]{kept} retenues[/green].")
+    conn.close()
+
+
+@app.command()
+def score(
+    limite: int = typer.Option(50, help="Nombre max d'offres a scorer par appel."),
+) -> None:
+    """Score les offres au statut 'new' avec le LLM et selectionne les bullets du CV."""
+    try:
+        settings.require_master_cv()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    cv = load_master_cv(settings.cv_path)
+    client = _llm_client()
+
+    conn = db.connect(settings.db_path)
+    rows = conn.execute(
+        "SELECT * FROM offers WHERE status = ? ORDER BY published_at DESC LIMIT ?",
+        (str(Status.NEW), limite),
+    ).fetchall()
+
+    if not rows:
+        console.print("[dim]Aucune offre au statut 'new' a scorer.[/dim]")
+        return
+
+    for row in rows:
+        offer = _offer_from_row(row)
+        try:
+            result = score_offer(client, offer, cv)
+        except Exception as exc:  # noqa: BLE001 - on continue sur les autres offres
+            console.print(f"[red]{offer.title[:50]:<50}[/red] echec : {exc}")
+            continue
+
+        db.save_score(conn, offer.id, result.score, result.reason, result.selected_ids)
+        conn.commit()
+
+        color = "green" if result.score >= 70 else "yellow" if result.score >= 40 else "red"
+        console.print(f"[{color}]{result.score:>3}[/{color}]  {offer.title[:60]}")
+        if result.dropped_ids:
+            console.print(f"      [dim]id hallucines ecartes : {result.dropped_ids}[/dim]")
+
+    conn.close()
+
+
+@cv_app.command("init")
+def cv_init(
+    force: bool = typer.Option(False, help="Ecraser un CV maitre existant."),
+) -> None:
+    """Cree un CV maitre vierge a partir du modele d'exemple."""
+    if settings.cv_path.exists() and not force:
+        console.print(
+            f"[yellow]{settings.cv_path} existe deja.[/yellow] "
+            "Utilise --force pour l'ecraser."
+        )
+        raise typer.Exit(1)
+
+    settings.cv_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(EXAMPLE_CV_PATH, settings.cv_path)
+    console.print(f"[green]Cree :[/green] {settings.cv_path}")
+    console.print("Remplace les valeurs d'exemple par les tiennes, puis : jobot cv check")
+
+
+@cv_app.command("import")
+def cv_import(
+    fichier: Path = typer.Argument(..., help="CV existant a convertir (HTML ou texte)."),
+    force: bool = typer.Option(False, help="Ecraser un CV maitre existant."),
+) -> None:
+    """Extrait un CV maitre depuis un CV existant, via le LLM."""
+    if not fichier.exists():
+        console.print(f"[red]Fichier introuvable : {fichier}[/red]")
+        raise typer.Exit(1)
+    if settings.cv_path.exists() and not force:
+        console.print(
+            f"[yellow]{settings.cv_path} existe deja.[/yellow] "
+            "Utilise --force pour l'ecraser."
+        )
+        raise typer.Exit(1)
+
+    raw = fichier.read_text(encoding="utf-8", errors="replace")
+    source = html_to_text(raw) if fichier.suffix.lower() in {".html", ".htm"} else raw
+    console.print(f"[dim]{len(source)} caracteres a analyser...[/dim]")
+
+    client = _llm_client()
+    try:
+        cv = extract_master_cv(client, source)
+    except Exception as exc:  # noqa: BLE001 - message lisible plutot qu'une trace
+        console.print(f"[red]Extraction en echec : {exc}[/red]")
+        raise typer.Exit(1)
+
+    save_master_cv(cv, settings.cv_path)
+    console.print(f"[green]Cree :[/green] {settings.cv_path}")
+    _print_cv_summary(cv)
+    console.print(
+        "\n[yellow]Relis le fichier avant de t'en servir[/yellow] : "
+        "le LLM peut avoir mal decoupe ou omis des elements."
+    )
+
+
+@cv_app.command("check")
+def cv_check() -> None:
+    """Valide le CV maitre et liste les id selectionnables."""
+    try:
+        settings.require_master_cv()
+        cv = load_master_cv(settings.cv_path)
+    except Exception as exc:  # noqa: BLE001 - erreurs de validation Pydantic incluses
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]CV maitre valide :[/green] {settings.cv_path}")
+    _print_cv_summary(cv)
+
+
+def _print_cv_summary(cv) -> None:
+    console.print(f"\n[bold]{cv.personal.name}[/bold] — {cv.personal.headline}")
+
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_row("Competences", str(sum(len(c.items) for c in cv.skills)))
+    table.add_row("Experiences", f"{len(cv.experiences)} ({sum(len(e.bullets) for e in cv.experiences)} bullets)")
+    table.add_row("Projets", f"{len(cv.projects)} ({sum(len(p.bullets) for p in cv.projects)} bullets)")
+    table.add_row("Formations", str(len(cv.education)))
+    table.add_row("[bold]Id selectionnables[/bold]", f"[bold]{len(cv.selectable_ids())}[/bold]")
+    console.print(table)
+
+
+@app.command("list")
+def list_offers(
+    statut: str = typer.Option("new", help="new / filtered_out / scored / applied..."),
+    limite: int = typer.Option(30),
+) -> None:
+    """Liste les offres en base."""
+    conn = db.connect(settings.db_path)
+    order = "score DESC" if statut == str(Status.SCORED) else "published_at DESC"
+    rows = conn.execute(
+        f"SELECT * FROM offers WHERE status = ? ORDER BY {order} LIMIT ?",
+        (statut, limite),
+    ).fetchall()
+
+    if not rows:
+        console.print(f"[dim]Aucune offre au statut '{statut}'.[/dim]")
+        return
+
+    table = Table(show_lines=False)
+    table.add_column("Id", width=22, no_wrap=True, style="dim")
+    if statut == str(Status.SCORED):
+        table.add_column("Score", width=5, justify="right")
+    table.add_column("Intitule", max_width=32, overflow="ellipsis")
+    table.add_column("Entreprise", max_width=16, overflow="ellipsis")
+    table.add_column("Lieu", max_width=14, overflow="ellipsis")
+    table.add_column("Canal")
+    if statut == str(Status.FILTERED_OUT):
+        table.add_column("Motif", max_width=28, overflow="ellipsis")
+
+    colors = {"email": "green", "form": "yellow", "unknown": "red"}
+    for row in rows:
+        cells = [row["id"]]
+        if statut == str(Status.SCORED):
+            score = row["score"] or 0
+            score_color = "green" if score >= 70 else "yellow" if score >= 40 else "red"
+            cells.append(f"[{score_color}]{score}[/{score_color}]")
+        cells += [
+            row["title"],
+            row["company"] or "—",
+            row["location"] or "—",
+            f"[{colors.get(row['channel'], 'white')}]{row['channel']}[/]",
+        ]
+        if statut == str(Status.FILTERED_OUT):
+            cells.append(row["filter_reason"] or "—")
+        table.add_row(*cells)
+
+    console.print(table)
+    console.print("[dim]Detail complet : jobot show <id>[/dim]")
+    conn.close()
+
+
+@app.command()
+def show(offer_id: str) -> None:
+    """Affiche le detail complet d'une offre (description, liens de candidature)."""
+    conn = db.connect(settings.db_path)
+    row = conn.execute("SELECT * FROM offers WHERE id = ?", (offer_id,)).fetchone()
+    conn.close()
+
+    if row is None:
+        console.print(f"[red]Aucune offre avec l'id '{offer_id}'.[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold]{row['title']}[/bold]  ({row['id']})")
+    console.print(f"{row['company'] or '—'} — {row['location'] or '—'}")
+    console.print(
+        f"Contrat : {row['contract_label'] or row['contract_type'] or '—'}"
+        f"   Alternance : {'oui' if row['is_alternance'] else 'non'}"
+        f"   Publiee : {row['published_at'] or '—'}"
+    )
+    if row["salary"]:
+        console.print(f"Salaire : {row['salary']}")
+    if row["experience"]:
+        console.print(f"Experience : {row['experience']}")
+
+    console.print(f"\nStatut : {row['status']}", end="")
+    if row["filter_reason"]:
+        console.print(f"  (ecartee : {row['filter_reason']})")
+    else:
+        console.print()
+
+    if row["score"] is not None:
+        console.print(f"\n[bold]Score LLM[/bold] : {row['score']}/100 — {row['score_reason']}")
+        if row["cv_selection"]:
+            ids = json.loads(row["cv_selection"])
+            console.print(f"[dim]Ids CV selectionnes ({len(ids)}) : {', '.join(ids)}[/dim]")
+
+    console.print(f"\n[bold]Canal[/bold] : {row['channel']}")
+    if row["apply_email"]:
+        console.print(f"  Email : {row['apply_email']}")
+    if row["apply_url"]:
+        console.print(f"  Postuler : {row['apply_url']}")
+    if row["origin_url"]:
+        console.print(f"  Offre originale : {row['origin_url']}")
+
+    console.print("\n[bold]Description[/bold]")
+    console.print(row["description"] or "[dim](vide)[/dim]")
+
+
+@app.command()
+def stats() -> None:
+    """Repartition des offres par statut et par canal de candidature."""
+    conn = db.connect(settings.db_path)
+    by_status = db.counts_by_status(conn)
+    by_channel = db.counts_by_channel(conn)
+
+    if not by_status:
+        console.print("[dim]Base vide — lance d'abord `jobot fetch`.[/dim]")
+        return
+
+    console.print("[bold]Par statut[/bold]")
+    for status, n in sorted(by_status.items(), key=lambda kv: -kv[1]):
+        console.print(f"  {status:<14} {n:>5}")
+
+    console.print("\n[bold]Par canal[/bold] [dim](hors ecartees)[/dim]")
+    labels = {
+        "email": "100% automatisable (SMTP)",
+        "form": "assiste (Playwright + clic humain)",
+        "unknown": "manuel",
+    }
+    for channel, n in sorted(by_channel.items(), key=lambda kv: -kv[1]):
+        console.print(f"  {channel:<9} {n:>5}   [dim]{labels.get(channel, '')}[/dim]")
+
+    conn.close()
+
+
+def _offer_from_row(row) -> "object":
+    from .models import Offer
+
+    return Offer(
+        source=row["source"],
+        native_id=row["native_id"],
+        title=row["title"],
+        company=row["company"],
+        description=row["description"],
+        contract_type=row["contract_type"],
+        contract_label=row["contract_label"],
+        location=row["location"],
+        postal_code=row["postal_code"],
+        department=row["department"],
+        salary=row["salary"],
+        experience=row["experience"],
+        is_alternance=bool(row["is_alternance"]),
+        apply_email=row["apply_email"],
+        apply_url=row["apply_url"],
+        origin_url=row["origin_url"],
+        published_at=row["published_at"],
+    )
+
+
+if __name__ == "__main__":
+    app()

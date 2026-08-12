@@ -1,0 +1,89 @@
+{
+  "personal": {
+    "name": "Camille Martin",
+    "headline": "Bachelor Informatique — 3ᵉ année",
+    "phone": "06 00 00 00 00",
+    "email": "camille.martin@example.com",
+    "github": "github.com/exemple",
+    "extra": "Permis B"
+  },
+
+  "summary": "Étudiante en informatique, en alternance sur des sujets d'infrastructure et d'automatisation. Profil orienté systèmes, réseaux et fiabilité logicielle.",
+
+  "skills": [
+    {
+      "category": "Systèmes & Réseau",
+      "items": [
+        { "id": "skill-linux", "label": "Linux" },
+        { "id": "skill-docker", "label": "Docker" },
+        { "id": "skill-reseau", "label": "TCP/IP" }
+      ]
+    },
+    {
+      "category": "Développement",
+      "items": [
+        { "id": "skill-python", "label": "Python" },
+        { "id": "skill-git", "label": "Git" },
+        { "id": "skill-ci", "label": "GitLab CI" }
+      ]
+    }
+  ],
+
+  "languages": [
+    {
+      "language": "Anglais",
+      "level": "B2",
+      "detail": "Lecture de documentation technique."
+    }
+  ],
+
+  "experiences": [
+    {
+      "id": "exp-exemple-alternance",
+      "title": "Alternance Administration Systèmes",
+      "company": "Entreprise Exemple, Ville",
+      "dates": "Sept. 2025 — Présent",
+      "bullets": [
+        {
+          "id": "exp-exemple-alternance-b1",
+          "text": "Automatisation du déploiement de serveurs applicatifs via des scripts Python."
+        },
+        {
+          "id": "exp-exemple-alternance-b2",
+          "text": "Mise en place de la supervision des services et des alertes associées."
+        }
+      ],
+      "tech_stack": "Python, Docker, GitLab CI."
+    }
+  ],
+
+  "projects": [
+    {
+      "id": "proj-homelab",
+      "title": "Homelab virtualisé",
+      "bullets": [
+        {
+          "id": "proj-homelab-b1",
+          "text": "Déploiement d'un serveur de virtualisation hébergeant plusieurs services internes."
+        },
+        {
+          "id": "proj-homelab-b2",
+          "text": "Segmentation réseau et filtrage entre les zones via un pare-feu dédié."
+        }
+      ]
+    }
+  ],
+
+  "education": [
+    {
+      "id": "edu-exemple",
+      "title": "Bachelor Informatique — 3ᵉ année",
+      "school": "École Exemple — 2025/2026"
+    }
+  ],
+
+  "interests": [
+    "Musique",
+    "Randonnée"
+  ]
+}

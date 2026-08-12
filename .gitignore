@@ -1,0 +1,14 @@
+.env
+.venv/
+
+# CV maitre : donnees personnelles (nom, telephone, email).
+# Le modele versionne est data/master-cv.example.json.
+data/master-cv.json
+__pycache__/
+*.pyc
+jobot.db
+jobot.db-journal
+chrome-profile/
+out/
+master-cv.json
+CvTest*.html
