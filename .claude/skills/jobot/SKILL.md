@@ -181,13 +181,25 @@ reformuler la tache, pas contourner la regle.
     `<label>` associe : d'ou `_CONFIRM_RE` + `_checkbox_text` (qui remonte au
     parent). Volontairement restreint a la confirmation explicite — pas
     question de cocher une case "je souhaite recevoir...".
+- **Ne jamais plafonner le parcours du DOM** : `_iter_matches` releve les
+  textes en un seul `evaluate` par frame, precisement pour ne pas avoir a
+  limiter le nombre d'elements examines. Le plafond de 150 qui existait avant
+  (pour tenir le cout d'un aller-retour Playwright par element) faisait
+  manquer tout le contenu utile des pages France Travail : les menus
+  deroulants du bandeau contiennent des centaines de `<a href>`, tous places
+  avant le formulaire dans le DOM. Symptome vecu : le bouton "Telecharger un
+  CV" jamais vu, donc ni clique ni compte comme etape manquante, donc une
+  candidature annoncee envoyee alors qu'elle etait restee sur l'ecran du CV.
 - **`submitted` ne doit jamais etre optimiste** : un faux "envoye" classe
   l'offre comme traitee et l'utilisateur n'y revient jamais — c'est l'erreur la
   plus couteuse du projet. Ne conclure a l'envoi que sur `_looks_sent` (message
   de confirmation du site) ou sur l'absence de blocage avere. "Il reste un
   bouton d'envoi" n'est PAS une preuve d'echec (un formulaire soumis en AJAX
   garde le sien) ; un depot de CV attendu et non satisfait, si — voir
-  `_blocked_on_upload`.
+  `_blocked_on_upload`, qui croise deux signaux independants (bouton de depot
+  repere, ou mention d'une etape CV dans le texte de la page). Cette
+  redondance est deliberee : la version qui ne regardait que le bouton a
+  produit un faux "envoyee" des que le reperage echouait.
 - **Depot de CV sans `input[type=file]` atteignable** : "Telecharger un CV" sur
   France Travail ouvre un selecteur de fichier natif. Deux parades
   complementaires, les deux necessaires : `set_input_files` sur les input

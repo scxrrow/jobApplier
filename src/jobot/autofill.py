@@ -65,6 +65,14 @@ _UPLOAD_RE = re.compile(
     re.I,
 )
 
+# Mention d'une etape « CV » dans le texte de la page ("CHOISIR MON CV" sur
+# France Travail). Repli quand le bouton de depot echappe au reperage.
+_CV_STEP_RE = re.compile(
+    r"choisir\s+mon\s+cv|(joindre|d[eé]poser|ajouter)\s+(un|mon|votre)\s+cv"
+    r"|cv\s*\(obligatoire\)|choose\s+(a|my|your)\s+(cv|resume)",
+    re.I,
+)
+
 # Cases a cocher qui conditionnent l'envoi. On ne coche que la confirmation
 # explicite : une case « je souhaite recevoir... » n'a rien a faire ici.
 _CONFIRM_RE = re.compile(
@@ -390,10 +398,22 @@ def _blocked_on_upload(page, report: AutofillReport) -> bool:
     Seule preuve fiable d'un envoi inabouti : « il reste un bouton d'envoi »
     n'en est pas une (un formulaire soumis en AJAX garde le sien), alors qu'un
     depot de CV attendu et non satisfait bloque a coup sur.
+
+    Deux signaux independants, le bouton de depot et la mention d'une etape CV
+    dans le texte de la page. Redondance voulue : tout faire reposer sur le
+    reperage du bouton s'est deja retourne contre nous une fois — quand il
+    echoue, jobot annonce une candidature envoyee alors qu'elle n'a pas quitte
+    l'ecran du CV, et l'offre est classee sans retour possible.
     """
     if report.uploaded:
         return False
-    return next(_iter_matches(page, _UPLOAD_RE, include_links=True), None) is not None
+    if next(_iter_matches(page, _UPLOAD_RE, include_links=True), None) is not None:
+        return True
+    try:
+        text = page.evaluate("() => document.body ? document.body.innerText : ''")
+    except Exception:  # noqa: BLE001
+        return False
+    return bool(_CV_STEP_RE.search(text or ""))
 
 
 def _page_state(page) -> str:
