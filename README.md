@@ -16,7 +16,7 @@ fetch → filtre → score → [TOI : review] → generate → send / assist
  auto     auto    auto      décision        auto      auto / [TOI]
 ```
 
-1. **`fetch`** — récupère les offres depuis l'API France Travail.
+1. **`fetch`** — récupère les offres depuis France Travail et l'APEC.
 2. **filtre** — élimine les offres hors périmètre (département, mots-clés,
    type de contrat) avant de payer le moindre appel LLM.
 3. **`score`** — un LLM note chaque offre restante par rapport à ton profil et
@@ -34,7 +34,8 @@ Chaque offre progresse dans ces statuts, stockés en base : `new` →
 
 - **Python 3.11+** et [`uv`](https://docs.astral.sh/uv/)
 - Un compte sur [francetravail.io](https://francetravail.io), avec une
-  souscription à l'API **Offres d'emploi v2** (gratuit)
+  souscription à l'API **Offres d'emploi v2** (gratuit). L'APEC, la seconde
+  source, ne demande aucun identifiant.
 - Un LLM au choix — un modèle local suffit, aucune clé n'est obligatoire
   (voir *Choix du LLM* plus bas)
 - *Optionnel* : des identifiants SMTP si tu veux l'envoi automatique par email
@@ -52,6 +53,8 @@ cp .env.example .env
    (Mon espace > Mes applications)
 2. `JOBOT_LLM_*` — voir *Choix du LLM*
 3. `JOBOT_DEPARTEMENTS`, `JOBOT_MOTS_CLES`, etc. — tes critères de recherche
+4. `JOBOT_SOURCES` — sources interrogées, par défaut `francetravail,apec`.
+   Mets `apec` seul pour démarrer sans compte francetravail.io.
 
 Puis crée ton CV maître :
 
@@ -197,6 +200,36 @@ Un petit modèle local respectera moins bien le schéma, mais **il ne peut pas
 pour autant inventer une ligne de CV** : la validation des `id` (voir *Le CV
 maître*) reste le garde-fou, quel que soit le modèle.
 
+## Les sources d'offres
+
+`JOBOT_SOURCES` choisit lesquelles sont interrogées, dans l'ordre. Chacune est
+appelée une fois par combinaison département × mot-clé, et la dédup se fait
+ensuite sur la clé `source:id`.
+
+| Source | Identifiants | Ce qu'elle apporte |
+|---|---|---|
+| `francetravail` | `FT_CLIENT_ID` / `FT_CLIENT_SECRET` | API officielle, annonce complète, adresse de contact quand elle existe |
+| `apec` | aucun | offres cadres absentes de France Travail |
+
+**L'APEC n'a pas d'API publique documentée** : `sources/apec.py` utilise les
+endpoints du site lui-même. Trois conséquences à connaître :
+
+- Un anti-bot protège le domaine, donc le client charge d'abord une page du
+  site pour récupérer ses cookies. Si une recherche renvoie 403, c'est lui —
+  espacer les appels suffit généralement.
+- Le détail d'une offre est bloqué par cet anti-bot, y compris depuis un vrai
+  navigateur. **jobot ne stocke donc que l'extrait de ~280 caractères renvoyé
+  par la recherche.** Le scoring travaille sur ce résumé et le sait (il lui est
+  précisé de ne pas pénaliser l'offre pour ce qui manque) ; le texte complet
+  reste à un clic, dans le navigateur ouvert par `jobot assist`.
+- Comme la description est partielle, le filtre par mots-clés n'est pas
+  réappliqué localement à ces offres — l'APEC a déjà cherché, elle, dans le
+  texte entier. Les rejeter sur un extrait tronqué écarterait des offres
+  pertinentes (`Offer.has_full_description`, testé dans `filters.py`).
+
+Ces endpoints n'étant pas contractuels, ils peuvent changer sans préavis :
+une source qui échoue affiche un avertissement, les autres continuent.
+
 ## Le canal de candidature
 
 Chaque offre est routée automatiquement à partir des champs renvoyés par
@@ -207,6 +240,9 @@ l'API :
 | `email` | `contact.courriel` | quasi complète — SMTP + PDF joint, confirmation avant envoi |
 | `form` | `contact.urlPostulation` ou `origineOffre.urlOrigine` | assistée — navigateur pré-rempli, clic humain final |
 | `unknown` | aucun des deux | écartée par défaut |
+
+L'APEC ne publie jamais d'adresse de contact : **toutes ses offres arrivent sur
+le canal `form`** et passent donc par `jobot assist`.
 
 `jobot stats` donne la répartition : c'est elle qui indique combien de
 candidatures peuvent réellement partir sans intervention manuelle sur le
@@ -221,6 +257,7 @@ Dans l'ordre où les données y circulent :
 | `config.py` | Config centralisée (`.env` → objet `settings`), messages d'erreur pour les identifiants manquants |
 | `models.py` | `Offer`, `Channel`, `Status` — le schéma d'une offre et son cycle de vie |
 | `sources/francetravail.py` | Client OAuth2 + pagination pour l'API France Travail |
+| `sources/apec.py` | Client de la recherche apec.fr (pas d'API publique — voir *Les sources d'offres*) |
 | `filters.py` | Filtrage à règles, sans appel LLM |
 | `db.py` | Toute l'écriture SQLite (dédup, upsert, transitions de statut) |
 | `cv.py` | Modèles du CV maître + `selectable_ids()`, le garde-fou anti-hallucination |
@@ -237,9 +274,12 @@ Dans l'ordre où les données y circulent :
 - **Pagination France Travail** : l'API plafonne à 150 résultats par appel et
   ~1150 au total par requête (`range=0-149`, puis `150-299`…). HTTP 206 =
   il en reste, 200 = fini.
-- **Croisement département × mot-clé** : l'API ne fait pas de OU sur les
-  mots-clés, donc jobot émet une requête par combinaison et dédoublonne côté
-  client.
+- **Pagination APEC** : `range` est plafonné à 100 — au-delà l'API retombe
+  silencieusement sur 20. Les résultats étant triés par date décroissante, le
+  filtre `--jours` s'arrête à la première offre trop ancienne.
+- **Croisement département × mot-clé** : aucune des deux API ne fait de OU sur
+  les mots-clés, donc jobot émet une requête par combinaison et dédoublonne
+  côté client.
 - **Dédup** : clé primaire `source:id`. Un `content_hash` détecte les offres
   réécrites par l'employeur et les repasse en `new` pour un nouveau scoring.
 - **Filtrage avant LLM** : chaque offre écartée par `filters.py` est un appel
@@ -247,8 +287,9 @@ Dans l'ordre où les données y circulent :
 
 ## Limites connues et pistes
 
-- Une seule source pour l'instant (France Travail) — l'APEC a une API JSON
-  interne exploitable en deuxième étape.
+- Les offres APEC n'ont qu'une description tronquée (voir *Les sources
+  d'offres*), ce qui rend leur scoring moins fin que celui des offres France
+  Travail.
 - Pas de relance automatique après candidature.
 - La revue (`jobot review`) est en ligne de commande — une petite UI web
   locale serait plus confortable pour relire les PDF sans quitter le

@@ -24,6 +24,10 @@ class Status(StrEnum):
     SKIPPED = "skipped"
 
 
+# Sources dont l'API de recherche ne renvoie qu'un extrait de l'annonce.
+EXCERPT_SOURCES = {"apec"}
+
+
 class Offer(BaseModel):
     source: str
     native_id: str
@@ -53,6 +57,10 @@ class Offer(BaseModel):
     @property
     def id(self) -> str:
         return f"{self.source}:{self.native_id}"
+
+    @property
+    def has_full_description(self) -> bool:
+        return self.source not in EXCERPT_SOURCES
 
     @property
     def channel(self) -> Channel:

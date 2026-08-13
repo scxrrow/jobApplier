@@ -1,0 +1,17 @@
+{# Corps de l'email de candidature. Modifie librement ce fichier : il n'est
+   jamais genere par le LLM, pour qu'aucune phrase inventee ne parte chez un
+   recruteur. Variables disponibles : cv, offer. #}
+Madame, Monsieur,
+
+Actuellement {{ cv.personal.headline }}, je vous adresse ma candidature au poste suivant : {{ offer.title }}{% if offer.company %}, chez {{ offer.company }}{% endif %}{% if offer.location %} ({{ offer.location }}){% endif %}.
+
+Vous trouverez ci-joint mon CV détaillant mon parcours et mes compétences.
+
+Je reste à votre disposition pour un échange.
+
+Cordialement,
+{{ cv.personal.name }}
+{% if cv.personal.phone %}{{ cv.personal.phone }}
+{% endif %}{{ cv.personal.email }}
+{% if cv.personal.github %}{{ cv.personal.github }}
+{% endif %}

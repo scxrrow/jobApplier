@@ -59,7 +59,10 @@ class FilterRules:
             if normalize(term) in title:
                 return f"titre exclu ({term})"
 
-        if self.mots_cles:
+        # Quand la source ne renvoie qu'un extrait de l'annonce, chercher les
+        # mots-cles dedans rejetterait des offres que la source a pourtant
+        # trouvees en cherchant, elle, dans le texte complet.
+        if self.mots_cles and offer.has_full_description:
             hits = [k for k in self.mots_cles if normalize(k) in haystack]
             if not hits:
                 return "aucun mot-cle metier"

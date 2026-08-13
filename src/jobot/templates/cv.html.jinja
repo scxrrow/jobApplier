@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>CV {{ cv.personal.name }}</title>
+    <style>
+        :root {
+            --primary: #0a192f;
+            --secondary: #112240;
+            --accent: #64ffda;
+            --text-main: #ccd6f6;
+            --text-dim: #8892b0;
+            --white: #e6f1ff;
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f0f2f5;
+            margin: 0; padding: 0;
+            color: var(--text-main);
+            font-size: 9.8pt;
+        }
+
+        .a4-page {
+            width: 210mm;
+            height: 297mm;
+            margin: 0 auto;
+            background: var(--primary);
+            display: flex;
+            box-shadow: 0 0 15px rgba(0,0,0,0.4);
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 33%;
+            background-color: var(--secondary);
+            padding: 25px 20px;
+            border-right: 1px solid rgba(100, 255, 218, 0.1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-section { margin-bottom: 22px; }
+        .sidebar-section h3 {
+            color: var(--accent);
+            text-transform: uppercase;
+            font-size: 10pt;
+            letter-spacing: 1.2px;
+            border-bottom: 1.5px solid var(--accent);
+            padding-bottom: 4px;
+            margin-bottom: 12px;
+        }
+
+        .contact-info div { margin-bottom: 7px; font-size: 9pt; color: var(--white); display: flex; align-items: center; gap: 8px; }
+
+        .skill-box { margin-bottom: 15px; }
+        .skill-box strong { color: var(--accent); font-size: 9.5pt; display: block; margin-bottom: 6px; }
+        .tags { display: flex; flex-wrap: wrap; gap: 5px; }
+        .tag {
+            background: rgba(100, 255, 218, 0.08);
+            color: var(--accent);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 8pt;
+            border: 1px solid rgba(100, 255, 218, 0.2);
+        }
+
+        .main-content {
+            width: 67%;
+            padding: 30px 35px;
+            display: flex; flex-direction: column;
+        }
+
+        header { margin-bottom: 14px; }
+        header h1 { margin: 0; font-size: 26pt; color: var(--white); font-weight: 800; text-transform: uppercase; letter-spacing: -0.5px; }
+        header h2 { margin: 2px 0 0 0; font-size: 15pt; color: var(--accent); font-weight: 400; }
+
+        .summary {
+            background: var(--secondary);
+            padding: 12px 15px;
+            border-radius: 4px;
+            line-height: 1.5;
+            color: var(--text-dim);
+            border-left: 4px solid var(--accent);
+            font-size: 9.3pt;
+            margin-bottom: 6px;
+        }
+
+        .section-title {
+            color: var(--white);
+            font-size: 13pt;
+            border-bottom: 2px solid var(--secondary);
+            padding-bottom: 4px;
+            margin: 18px 0 12px 0;
+            text-transform: uppercase;
+            font-weight: 700;
+        }
+
+        .item { margin-bottom: 16px; }
+        .item-header { display: flex; justify-content: space-between; font-weight: 700; color: var(--white); font-size: 10.5pt; }
+        .item-sub { color: var(--accent); font-style: italic; font-size: 9.5pt; margin: 2px 0 6px 0; }
+
+        ul { margin: 0; padding-left: 18px; color: var(--text-dim); }
+        li { margin-bottom: 4px; line-height: 1.4; }
+
+        .tech-stack {
+            margin-top: 8px;
+            font-size: 8.8pt;
+            color: var(--accent);
+            font-family: 'Consolas', monospace;
+            background: rgba(100, 255, 218, 0.05);
+            padding: 4px 8px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+
+        @media print {
+            body { padding: 0; background: none; }
+            .a4-page { margin: 0; box-shadow: none; border: none; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="a4-page">
+    <aside class="sidebar">
+        <div class="sidebar-section">
+            <h3>Contact</h3>
+            <div class="contact-info">
+                {% if cv.personal.phone %}<div>Tél. {{ cv.personal.phone }}</div>{% endif %}
+                <div>{{ cv.personal.email }}</div>
+                {% if cv.personal.github %}<div>{{ cv.personal.github }}</div>{% endif %}
+                {% if cv.personal.extra %}<div>{{ cv.personal.extra }}</div>{% endif %}
+            </div>
+        </div>
+
+        {% if skill_categories %}
+        <div class="sidebar-section">
+            <h3>Expertises</h3>
+            {% for category in skill_categories %}
+            <div class="skill-box" {% if loop.last %}style="margin-bottom:0;"{% endif %}>
+                <strong>{{ category.category }}</strong>
+                <div class="tags">
+                    {% for item in category.items %}<span class="tag">{{ item.label }}</span>{% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if cv.languages %}
+        <div class="sidebar-section">
+            <h3>Linguistique</h3>
+            {% for lang in cv.languages %}
+            <div style="color: var(--white); font-weight: bold; font-size: 9.5pt;">{{ lang.language }} : Niveau {{ lang.level }}</div>
+            {% if lang.detail %}<div style="font-size: 8.5pt; color: var(--text-dim); margin-top: 4px; margin-bottom: 8px; line-height: 1.3;">{{ lang.detail }}</div>{% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if cv.interests %}
+        <div class="sidebar-section" style="margin-bottom:0;">
+            <h3>Intérêts</h3>
+            <div style="font-size: 9pt; line-height: 1.5; color: var(--text-dim);">
+                {% for interest in cv.interests %}• {{ interest }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </aside>
+
+    <main class="main-content">
+        <header>
+            <h1>{{ cv.personal.name }}</h1>
+            <h2>{{ cv.personal.headline }}</h2>
+        </header>
+
+        {% if cv.summary %}<div class="summary">{{ cv.summary }}</div>{% endif %}
+
+        {% if experiences %}
+        <section>
+            <div class="section-title">Expériences Professionnelles</div>
+            {% for exp in experiences %}
+            <div class="item">
+                <div class="item-header">
+                    <span>{{ exp.title }}</span>
+                    <span>{{ exp.dates }}</span>
+                </div>
+                <div class="item-sub">{{ exp.company }}</div>
+                <ul>
+                    {% for bullet in exp.bullets %}<li>{{ bullet.text }}</li>{% endfor %}
+                </ul>
+                {% if exp.tech_stack %}<div class="tech-stack">Stack: {{ exp.tech_stack }}</div>{% endif %}
+            </div>
+            {% endfor %}
+        </section>
+        {% endif %}
+
+        {% if projects %}
+        <section>
+            <div class="section-title">Projets Majeurs</div>
+            {% for project in projects %}
+            <div class="item">
+                <div class="item-header">{{ project.title }}</div>
+                <ul>
+                    {% for bullet in project.bullets %}<li>{{ bullet.text }}</li>{% endfor %}
+                </ul>
+            </div>
+            {% endfor %}
+        </section>
+        {% endif %}
+
+        {% if cv.education %}
+        <section style="margin-bottom:0;">
+            <div class="section-title">Formation</div>
+            {% for edu in cv.education %}
+            <div class="item" style="margin-bottom: 8px;">
+                <div class="item-header">{{ edu.title }}</div>
+                <div class="item-sub">{{ edu.school }}</div>
+            </div>
+            {% endfor %}
+        </section>
+        {% endif %}
+    </main>
+</div>
+
+</body>
+</html>

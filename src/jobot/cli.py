@@ -18,10 +18,20 @@ from .cv import (
     save_master_cv,
 )
 from .filters import FilterRules
+from .assist import apply_url, clipboard_fields, open_application_page
 from .llm import LLMError, build_client
-from .models import Status
+from .mailer import build_message, build_subject, send_message
+from .models import Channel, Status
+from .render import render_html, render_pdf
 from .scoring import score_offer
-from .sources import FranceTravailClient, FranceTravailError, parse_offer
+from .sources import (
+    ApecClient,
+    ApecError,
+    FranceTravailClient,
+    FranceTravailError,
+    parse_apec_offer,
+    parse_ft_offer,
+)
 
 app = typer.Typer(add_completion=False, help="Pipeline de candidature automatisee.")
 cv_app = typer.Typer(help="Gestion du CV maitre (data/master-cv.json).")
@@ -38,37 +48,35 @@ def _llm_client():
         raise typer.Exit(1)
 
 
-@app.command()
-def fetch(
-    jours: int = typer.Option(7, help="Ne recuperer que les offres publiees depuis N jours."),
-    max_par_requete: int = typer.Option(600, help="Plafond de resultats par combinaison."),
-    dry_run: bool = typer.Option(False, help="Afficher sans ecrire en base."),
+SOURCE_NAMES = ("francetravail", "apec")
+
+
+def _fetch_source(
+    name: str,
+    *,
+    jours: int,
+    max_par_requete: int,
+    offers: list,
+    raws: dict,
+    seen: set[str],
 ) -> None:
-    """Recupere les offres France Travail et les stocke en base."""
-    try:
-        settings.require_ft_credentials()
-    except RuntimeError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+    """Interroge une source sur toutes les combinaisons departement x mot-cle."""
+    if name == "francetravail":
+        client = FranceTravailClient(settings.ft_client_id, settings.ft_client_secret)
+        parse, error = parse_ft_offer, FranceTravailError
+    else:
+        client = ApecClient()
+        parse, error = parse_apec_offer, ApecError
 
-    rules = FilterRules(
-        departements=settings.departements,
-        mots_cles=settings.mots_cles,
-        alternance_only=settings.jobot_alternance_only,
-    )
+    # Une requete par (departement x mot-cle) : aucune des deux API ne fait de
+    # OU sur les mots-cles, on croise donc nous-memes puis on dedoublonne.
+    combos = [
+        (dep, kw)
+        for dep in (settings.departements or [None])
+        for kw in (settings.mots_cles or [None])
+    ]
 
-    offers, raws = [], {}
-    seen: set[str] = set()
-
-    with FranceTravailClient(settings.ft_client_id, settings.ft_client_secret) as client:
-        # Une requete par (departement x mot-cle) : l'API ne fait pas de OU
-        # sur les mots-cles, on croise donc nous-memes puis on dedoublonne.
-        combos = [
-            (dep, kw)
-            for dep in (settings.departements or [None])
-            for kw in (settings.mots_cles or [None])
-        ]
-
+    with client:
         for dep, kw in combos:
             label = f"dep={dep or '*'} kw={kw or '*'}"
             try:
@@ -79,13 +87,13 @@ def fetch(
                     publiee_depuis=jours,
                     max_results=max_par_requete,
                 )
-            except FranceTravailError as exc:
+            except error as exc:
                 console.print(f"[yellow]{label} : {exc}[/yellow]")
                 continue
 
             fresh = 0
             for raw in raw_offers:
-                offer = parse_offer(raw)
+                offer = parse(raw)
                 if offer.id in seen:
                     continue
                 seen.add(offer.id)
@@ -94,6 +102,50 @@ def fetch(
                 fresh += 1
 
             console.print(f"  {label:<45} {len(raw_offers):>4} recues, {fresh:>4} uniques")
+
+
+@app.command()
+def fetch(
+    jours: int = typer.Option(7, help="Ne recuperer que les offres publiees depuis N jours."),
+    max_par_requete: int = typer.Option(600, help="Plafond de resultats par combinaison."),
+    dry_run: bool = typer.Option(False, help="Afficher sans ecrire en base."),
+) -> None:
+    """Recupere les offres des sources configurees et les stocke en base."""
+    sources = settings.sources
+    unknown = [name for name in sources if name not in SOURCE_NAMES]
+    if unknown:
+        console.print(
+            f"[red]Source inconnue : {', '.join(unknown)}.[/red] "
+            f"JOBOT_SOURCES accepte : {', '.join(SOURCE_NAMES)}."
+        )
+        raise typer.Exit(1)
+
+    if "francetravail" in sources:
+        try:
+            settings.require_ft_credentials()
+        except RuntimeError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+
+    rules = FilterRules(
+        departements=settings.departements,
+        mots_cles=settings.mots_cles,
+        alternance_only=settings.jobot_alternance_only,
+    )
+
+    offers, raws = [], {}
+    seen: set[str] = set()
+
+    for name in sources:
+        console.print(f"[bold]{name}[/bold]")
+        _fetch_source(
+            name,
+            jours=jours,
+            max_par_requete=max_par_requete,
+            offers=offers,
+            raws=raws,
+            seen=seen,
+        )
 
     console.print(f"\n[bold]{len(offers)}[/bold] offres uniques recuperees.")
 
@@ -164,6 +216,255 @@ def score(
         if result.dropped_ids:
             console.print(f"      [dim]id hallucines ecartes : {result.dropped_ids}[/dim]")
 
+    conn.close()
+
+
+def _build_cv_files(row, cv, out_dir: Path) -> tuple[Path, Path]:
+    """Rend le CV adapte a une offre. Retourne (html_path, pdf_path)."""
+    html = render_html(cv, json.loads(row["cv_selection"]))
+    safe_id = row["id"].replace(":", "_").replace("/", "_")
+    html_path = out_dir / f"{safe_id}.html"
+    pdf_path = out_dir / f"{safe_id}.pdf"
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    html_path.write_text(html, encoding="utf-8")
+    render_pdf(html, pdf_path)
+    return html_path, pdf_path
+
+
+def _require_scored(row, offer_id: str):
+    if row is None:
+        console.print(f"[red]Aucune offre avec l'id '{offer_id}'.[/red]")
+        raise typer.Exit(1)
+    if not row["cv_selection"]:
+        console.print(
+            f"[red]Offre pas encore scoree (statut : {row['status']}).[/red] "
+            "Lance d'abord : jobot score"
+        )
+        raise typer.Exit(1)
+
+
+@app.command()
+def generate(
+    offer_id: str,
+    out_dir: Path = typer.Option(None, help="Dossier de sortie pour le HTML/PDF."),
+) -> None:
+    """Genere le CV adapte (HTML + PDF) pour une offre deja scoree."""
+    try:
+        settings.require_master_cv()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    conn = db.connect(settings.db_path)
+    row = conn.execute("SELECT * FROM offers WHERE id = ?", (offer_id,)).fetchone()
+    conn.close()
+    _require_scored(row, offer_id)
+
+    cv = load_master_cv(settings.cv_path)
+    try:
+        html_path, pdf_path = _build_cv_files(row, cv, out_dir or settings.out_dir)
+    except Exception as exc:  # noqa: BLE001 - message lisible plutot qu'une trace
+        console.print(f"[red]Generation du PDF en echec : {exc}[/red]")
+        console.print("[dim]Navigateur installe ? uv run playwright install chromium[/dim]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]HTML :[/green] {html_path}")
+    console.print(f"[green]PDF  :[/green] {pdf_path}")
+
+
+@app.command()
+def review(
+    score_min: int = typer.Option(0, help="Ne revoir que les offres au-dessus de ce score."),
+    limite: int = typer.Option(20),
+) -> None:
+    """Passe en revue les offres scorees : garder (queued) ou ecarter (skipped)."""
+    conn = db.connect(settings.db_path)
+    rows = conn.execute(
+        "SELECT * FROM offers WHERE status = ? AND COALESCE(score, 0) >= ? "
+        "ORDER BY score DESC LIMIT ?",
+        (str(Status.SCORED), score_min, limite),
+    ).fetchall()
+
+    if not rows:
+        console.print("[dim]Aucune offre a revoir.[/dim]")
+        conn.close()
+        return
+
+    console.print(f"[bold]{len(rows)} offre(s) a revoir.[/bold] Ctrl-C pour arreter.\n")
+    kept = skipped = 0
+
+    for i, row in enumerate(rows, 1):
+        color = "green" if (row["score"] or 0) >= 70 else "yellow" if (row["score"] or 0) >= 40 else "red"
+        console.print(f"[dim]({i}/{len(rows)})[/dim] [{color}]{row['score']}/100[/{color}]  [bold]{row['title']}[/bold]")
+        console.print(f"        {row['company'] or '—'} — {row['location'] or '—'}  [dim]({row['channel']})[/dim]")
+        console.print(f"        [dim]{row['score_reason']}[/dim]")
+        console.print(f"        [dim]{row['id']}[/dim]")
+
+        try:
+            choice = typer.prompt("        [g]arder / [e]carter / [d]etail / [q]uitter", default="g")
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[dim]Interrompu.[/dim]")
+            break
+
+        choice = choice.strip().lower()[:1]
+        if choice == "q":
+            break
+        if choice == "d":
+            console.print(f"\n{row['description']}\n")
+            choice = typer.prompt("        [g]arder / [e]carter", default="g").strip().lower()[:1]
+
+        if choice == "e":
+            db.set_status(conn, row["id"], Status.SKIPPED)
+            skipped += 1
+            console.print("        [red]ecartee[/red]\n")
+        else:
+            db.set_status(conn, row["id"], Status.QUEUED)
+            kept += 1
+            console.print("        [green]en attente d'envoi[/green]\n")
+        conn.commit()
+
+    conn.close()
+    console.print(f"[green]{kept} gardee(s)[/green], [red]{skipped} ecartee(s)[/red].")
+    if kept:
+        console.print("[dim]Suite : jobot send (canal email) / jobot assist <id> (canal form)[/dim]")
+
+
+@app.command()
+def send(
+    envoyer: bool = typer.Option(
+        False,
+        "--envoyer",
+        help="Envoyer reellement. Sans ce drapeau : simulation seule.",
+    ),
+    limite: int = typer.Option(10),
+) -> None:
+    """Envoie les candidatures 'queued' du canal email (SMTP + CV en piece jointe).
+
+    Simulation par defaut : rien ne part sans --envoyer.
+    """
+    try:
+        settings.require_master_cv()
+        if envoyer:
+            settings.require_smtp()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    conn = db.connect(settings.db_path)
+    rows = conn.execute(
+        "SELECT * FROM offers WHERE status = ? AND channel = ? ORDER BY score DESC LIMIT ?",
+        (str(Status.QUEUED), str(Channel.EMAIL), limite),
+    ).fetchall()
+
+    if not rows:
+        console.print("[dim]Aucune candidature email en attente.[/dim]")
+        console.print("[dim]Passe d'abord des offres en 'queued' avec : jobot review[/dim]")
+        conn.close()
+        return
+
+    cv = load_master_cv(settings.cv_path)
+
+    if not envoyer:
+        console.print(
+            f"[yellow]SIMULATION[/yellow] — {len(rows)} candidature(s) prete(s). "
+            "Rien ne sera envoye.\n"
+        )
+    else:
+        console.print(f"[bold red]{len(rows)} email(s) vont partir reellement.[/bold red]")
+        console.print(f"[dim]Expediteur : {settings.sender_address}[/dim]\n")
+        for row in rows:
+            console.print(f"  → {row['apply_email']}  ({row['title'][:50]})")
+        if not typer.confirm("\nConfirmer l'envoi ?", default=False):
+            console.print("[dim]Annule.[/dim]")
+            conn.close()
+            return
+        console.print()
+
+    for row in rows:
+        offer = _offer_from_row(row)
+        try:
+            _, pdf_path = _build_cv_files(row, cv, settings.out_dir)
+            msg = build_message(settings=settings, cv=cv, offer=offer, pdf_path=pdf_path)
+        except Exception as exc:  # noqa: BLE001 - on continue sur les autres offres
+            console.print(f"[red]{offer.title[:45]:<45}[/red] preparation en echec : {exc}")
+            continue
+
+        if not envoyer:
+            console.print(f"[yellow]→[/yellow] {offer.apply_email}")
+            console.print(f"   Objet : {build_subject(offer)}")
+            console.print(f"   Piece jointe : {pdf_path.name}")
+            console.print(f"   [dim]{msg.get_body(('plain',)).get_content().strip()[:160]}...[/dim]\n")
+            continue
+
+        try:
+            send_message(msg, settings)
+        except Exception as exc:  # noqa: BLE001 - on continue sur les autres offres
+            console.print(f"[red]{offer.apply_email:<35}[/red] envoi en echec : {exc}")
+            continue
+
+        db.mark_applied(conn, offer.id)
+        conn.commit()
+        console.print(f"[green]envoye[/green] → {offer.apply_email}  ({offer.title[:45]})")
+
+    conn.close()
+    if not envoyer:
+        console.print("[dim]Pour envoyer pour de vrai : jobot send --envoyer[/dim]")
+
+
+@app.command()
+def assist(offer_id: str) -> None:
+    """Ouvre le formulaire de candidature dans un navigateur, CV genere a cote.
+
+    L'envoi final reste un clic humain : jobot ne soumet jamais le formulaire.
+    """
+    try:
+        settings.require_master_cv()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    conn = db.connect(settings.db_path)
+    row = conn.execute("SELECT * FROM offers WHERE id = ?", (offer_id,)).fetchone()
+    _require_scored(row, offer_id)
+
+    offer = _offer_from_row(row)
+    url = apply_url(offer)
+    if not url:
+        console.print(f"[red]Aucune URL de candidature pour {offer_id}.[/red]")
+        conn.close()
+        raise typer.Exit(1)
+
+    cv = load_master_cv(settings.cv_path)
+    try:
+        _, pdf_path = _build_cv_files(row, cv, settings.out_dir)
+    except Exception as exc:  # noqa: BLE001 - message lisible plutot qu'une trace
+        console.print(f"[red]Generation du CV en echec : {exc}[/red]")
+        conn.close()
+        raise typer.Exit(1)
+
+    console.print(f"[bold]{offer.title}[/bold] — {offer.company or '—'}\n")
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    for label, value in clipboard_fields(cv, pdf_path):
+        table.add_row(f"[dim]{label}[/dim]", value)
+    console.print(table)
+    console.print(f"\n[dim]Ouverture de {url}[/dim]")
+    console.print("[yellow]Remplis et envoie toi-meme, puis ferme le navigateur.[/yellow]\n")
+
+    try:
+        open_application_page(url, settings.chrome_profile)
+    except Exception as exc:  # noqa: BLE001 - message lisible plutot qu'une trace
+        console.print(f"[red]Ouverture du navigateur en echec : {exc}[/red]")
+        console.print("[dim]Navigateur installe ? uv run playwright install chromium[/dim]")
+        conn.close()
+        raise typer.Exit(1)
+
+    if typer.confirm("Candidature envoyee ?", default=False):
+        db.mark_applied(conn, offer.id)
+        conn.commit()
+        console.print("[green]Marquee comme envoyee.[/green]")
+    else:
+        console.print(f"[dim]Laissee en '{row['status']}'.[/dim]")
     conn.close()
 
 

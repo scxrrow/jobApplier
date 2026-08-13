@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .models import Offer, Status
@@ -63,6 +64,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(offers)")}
     if "cv_selection" not in cols:
         conn.execute("ALTER TABLE offers ADD COLUMN cv_selection TEXT")
+    if "applied_at" not in cols:
+        conn.execute("ALTER TABLE offers ADD COLUMN applied_at TEXT")
     conn.commit()
 
 
@@ -152,6 +155,17 @@ def save_score(
     conn.execute(
         "UPDATE offers SET status=?, score=?, score_reason=?, cv_selection=? WHERE id=?",
         (str(Status.SCORED), score, reason, json.dumps(selected_ids), offer_id),
+    )
+
+
+def set_status(conn: sqlite3.Connection, offer_id: str, status: Status) -> None:
+    conn.execute("UPDATE offers SET status=? WHERE id=?", (str(status), offer_id))
+
+
+def mark_applied(conn: sqlite3.Connection, offer_id: str) -> None:
+    conn.execute(
+        "UPDATE offers SET status=?, applied_at=? WHERE id=?",
+        (str(Status.APPLIED), datetime.now(timezone.utc).isoformat(), offer_id),
     )
 
 

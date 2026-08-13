@@ -59,6 +59,11 @@ def _offer_prompt(offer: Offer) -> str:
         "experience_requise": offer.experience,
         "description": offer.description,
     }
+    if not offer.has_full_description:
+        payload["description_tronquee"] = (
+            "Seul le debut de l'annonce est disponible. Juge sur ce qui est la, "
+            "sans penaliser l'offre pour ce qui manque."
+        )
     return f"Offre a evaluer (JSON) :\n{json.dumps(payload, ensure_ascii=False)}"
 
 

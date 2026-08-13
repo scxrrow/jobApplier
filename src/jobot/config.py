@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     ft_client_id: str = ""
     ft_client_secret: str = ""
 
+    # Sources d'offres interrogees par `jobot fetch`, dans l'ordre.
+    jobot_sources: str = "francetravail,apec"
+
     # LLM : n'importe quelle API OpenAI-compatible (LM Studio, Ollama, OpenAI,
     # OpenRouter...) ou Gemini natif. Voir llm/__init__.py pour les raccourcis.
     jobot_llm_provider: str = "gemini"
@@ -30,8 +33,23 @@ class Settings(BaseSettings):
     jobot_types_contrat: str = ""
     jobot_alternance_only: bool = False
 
+    # SMTP (canal 'email' uniquement). Pour Gmail/Outlook : mot de passe
+    # d'application, jamais le mot de passe du compte.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_tls: str = "starttls"  # starttls | ssl | none
+
     db_path: Path = ROOT / "jobot.db"
     cv_path: Path = ROOT / "data" / "master-cv.json"
+    out_dir: Path = ROOT / "out"
+    chrome_profile: Path = ROOT / "chrome-profile"
+
+    @property
+    def sources(self) -> list[str]:
+        return _split(self.jobot_sources)
 
     @property
     def departements(self) -> list[str]:
@@ -53,6 +71,23 @@ class Settings(BaseSettings):
                 "  2. Souscris a l'API 'Offres d'emploi v2'\n"
                 "  3. Copie .env.example vers .env et colle tes identifiants"
             )
+
+    def require_smtp(self) -> None:
+        checks = [("SMTP_HOST", self.smtp_host)]
+        # Un relais local sans chiffrement n'exige generalement pas d'authentification.
+        if self.smtp_tls.strip().lower() != "none":
+            checks += [("SMTP_USER", self.smtp_user), ("SMTP_PASSWORD", self.smtp_password)]
+        missing = [name for name, value in checks if not value]
+        if missing:
+            raise RuntimeError(
+                f"Configuration SMTP incomplete : {', '.join(missing)} absent(s).\n"
+                "  Renseigne-les dans .env (cf .env.example).\n"
+                "  Gmail / Outlook : utilise un mot de passe d'application."
+            )
+
+    @property
+    def sender_address(self) -> str:
+        return self.smtp_from or self.smtp_user
 
     def require_master_cv(self) -> None:
         if not self.cv_path.exists():
