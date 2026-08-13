@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JOBOT — Candidatures</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+
+<nav>
+  <div class="container">
+    <a href="/" class="wordmark">JOB<span>O</span>T</a>
+    <div class="nav-links">
+      <a href="/" class="nav-link">Recherche</a>
+    </div>
+  </div>
+</nav>
+
+<section>
+  <div class="container">
+    <h1 class="hero-title">Candidatures<br>envoyées.</h1>
+    <p class="subtitle" style="margin:24px 0 16px" id="applied-count"></p>
+
+    <div class="applied-rows" id="applied-rows"></div>
+    <div class="empty hidden" id="applied-empty">
+      Aucune candidature envoyée pour l'instant. Elles apparaîtront ici au fur et à
+      mesure de tes validations.
+    </div>
+  </div>
+</section>
+
+<div id="toasts"></div>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const api = async (path, opts = {}) => {
+  const resp = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+  if (!resp.ok) {
+    let detail = resp.statusText;
+    try { detail = (await resp.json()).detail || detail; } catch (e) { /* texte brut */ }
+    throw new Error(detail);
+  }
+  return resp.json();
+};
+
+function toast(msg, kind = "info") {
+  const el = document.createElement("div");
+  el.className = `toast ${kind}`;
+  el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 6000);
+}
+
+function esc(text) {
+  const d = document.createElement("div");
+  d.textContent = text ?? "";
+  return d.innerHTML;
+}
+
+async function load() {
+  let applied;
+  try {
+    applied = await api("/api/offers?statuts=applied&limite=300");
+  } catch (e) {
+    return toast("Impossible de joindre le serveur jobot : " + e.message, "error");
+  }
+
+  $("applied-count").textContent = applied.length
+    ? `${applied.length} candidature${applied.length > 1 ? "s" : ""}, la plus récente en premier.`
+    : "";
+  $("applied-empty").classList.toggle("hidden", applied.length > 0);
+  $("applied-rows").innerHTML = applied.map((o) => `
+    <div class="applied-row">
+      <span class="badge applied">envoyée</span>
+      <span class="t">${esc(o.title)}</span>
+      <span class="c">${esc(o.company || "—")}</span>
+      <span class="d">${o.applied_at ? new Date(o.applied_at).toLocaleDateString("fr-FR") : ""}</span>
+    </div>`).join("");
+}
+
+load();
+</script>
+</body>
+</html>

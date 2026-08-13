@@ -15,17 +15,20 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import db, pipeline
 from .assist import apply_url as offer_apply_url
 from .assist import clipboard_fields, open_application_page
 from .autofill import auto_apply
-from .config import settings
+from .config import reload_settings, settings, write_env_values
 from .cv import extract_master_cv, html_to_text, load_master_cv, save_master_cv
+from .llm import PRESETS as LLM_PRESETS
 from .llm import LLMError, build_client
 from .mailer import build_body, build_subject
 from .models import Channel, Status
@@ -33,6 +36,8 @@ from .models import Channel, Status
 WEBUI_DIR = Path(__file__).parent / "webui"
 
 app = FastAPI(title="jobot", docs_url=None, redoc_url=None)
+# CSS partagee entre les pages (index.html, candidatures.html).
+app.mount("/assets", StaticFiles(directory=WEBUI_DIR), name="assets")
 
 
 def _conn():
@@ -122,6 +127,11 @@ def _llm_ok() -> bool:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(WEBUI_DIR / "index.html", media_type="text/html")
+
+
+@app.get("/candidatures")
+def candidatures_page() -> FileResponse:
+    return FileResponse(WEBUI_DIR / "candidatures.html", media_type="text/html")
 
 
 @app.get("/api/meta")
@@ -330,13 +340,41 @@ _ASSIST_IDLE: dict[str, Any] = {
     "fields": [],
     "mode": "manual",
     "report": None,
+    "login_domain": None,
 }
 _ASSIST: dict[str, Any] = dict(_ASSIST_IDLE)
+
+# Debloque le thread d'autofill en pause sur un mur de connexion.
+_RESUME = threading.Event()
+
+# Au-dela, on considere que l'utilisateur a abandonne la connexion et on
+# laisse la candidature en attente plutot que de bloquer le thread a vie.
+LOGIN_TIMEOUT_S = 900
 
 
 def _assist_snapshot() -> dict[str, Any]:
     with _ASSIST_LOCK:
         return dict(_ASSIST)
+
+
+def _on_login_required(domain: str) -> None:
+    _RESUME.clear()
+    with _ASSIST_LOCK:
+        _ASSIST["status"] = "login_required"
+        _ASSIST["login_domain"] = domain
+
+
+def _wait_for_resume() -> bool:
+    """Bloque jusqu'au clic sur « Reprendre » dans l'UI (ou expiration).
+
+    Ne prend surtout pas `_ASSIST_LOCK` : l'UI doit pouvoir lire l'etat
+    pendant toute l'attente.
+    """
+    resumed = _RESUME.wait(timeout=LOGIN_TIMEOUT_S)
+    with _ASSIST_LOCK:
+        if _ASSIST["status"] == "login_required":
+            _ASSIST["status"] = "open"
+    return resumed
 
 
 def _assist_thread(url: str, *, auto: bool, cv, pdf_path, message: str) -> None:
@@ -353,6 +391,8 @@ def _assist_thread(url: str, *, auto: bool, cv, pdf_path, message: str) -> None:
                 message=message,
                 profile_dir=settings.chrome_profile,
                 on_report=on_report,
+                on_login_required=_on_login_required,
+                wait_for_resume=_wait_for_resume,
             )
         else:
             open_application_page(url, settings.chrome_profile)
@@ -382,7 +422,7 @@ def assist_offer(offer_id: str, body: AssistStart | None = None) -> dict[str, An
             raise HTTPException(400, "Aucune URL de candidature pour cette offre.")
 
         with _ASSIST_LOCK:
-            if _ASSIST["status"] == "open":
+            if _ASSIST["status"] in ("open", "login_required"):
                 raise HTTPException(409, "Un navigateur de candidature est déjà ouvert : ferme-le d'abord.")
 
         try:
@@ -404,6 +444,7 @@ def assist_offer(offer_id: str, body: AssistStart | None = None) -> dict[str, An
         auto = saved.form_auto if saved else True
 
     fields = [{"label": lab, "value": val} for lab, val in clipboard_fields(cv, pdf_path)]
+    _RESUME.clear()
     with _ASSIST_LOCK:
         _ASSIST.update(
             {
@@ -413,6 +454,7 @@ def assist_offer(offer_id: str, body: AssistStart | None = None) -> dict[str, An
                 "fields": fields,
                 "mode": "auto" if auto else "manual",
                 "report": None,
+                "login_domain": None,
             }
         )
     threading.Thread(
@@ -433,9 +475,22 @@ class AssistDone(BaseModel):
     applied: bool
 
 
+@app.post("/api/assist/resume")
+def assist_resume() -> dict[str, Any]:
+    """L'utilisateur s'est connecté : l'autofill reprend où il s'était arrêté."""
+    with _ASSIST_LOCK:
+        if _ASSIST["status"] != "login_required":
+            raise HTTPException(409, "Aucune candidature en attente de connexion.")
+    _RESUME.set()
+    return {"resumed": True}
+
+
 @app.post("/api/assist/done")
 def assist_done(body: AssistDone) -> dict[str, Any]:
     """L'utilisateur repond a « candidature envoyée ? » apres le navigateur."""
+    # Debloque un thread encore en attente de connexion, sinon il tiendrait
+    # le navigateur ouvert jusqu'a l'expiration.
+    _RESUME.set()
     with _ASSIST_LOCK:
         offer_id = _ASSIST["offer_id"]
         _ASSIST.update(dict(_ASSIST_IDLE))
@@ -447,6 +502,163 @@ def assist_done(body: AssistDone) -> dict[str, Any]:
         finally:
             conn.close()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Connexions aux plateformes. Le mur d'authentification est par site, pas par
+# offre : une connexion dans le profil persistant vaut pour toutes les offres
+# du domaine, et pour les runs suivants. Cet ecran permet de les faire d'avance
+# plutot que de se faire interrompre en pleine serie de candidatures.
+
+
+@app.get("/api/logins")
+def logins() -> list[dict[str, Any]]:
+    """Plateformes presentes dans les offres en attente, par volume."""
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT apply_url, origin_url FROM offers WHERE status IN (?, ?, ?)",
+            (str(Status.SCORED), str(Status.QUEUED), str(Status.NEW)),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    by_domain: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        url = row["apply_url"] or row["origin_url"]
+        if not url:
+            continue
+        domain = urlparse(url).netloc
+        if not domain:
+            continue
+        entry = by_domain.setdefault(domain, {"domain": domain, "offers": 0, "url": url})
+        entry["offers"] += 1
+    return sorted(by_domain.values(), key=lambda e: -e["offers"])
+
+
+class LoginOpen(BaseModel):
+    domain: str
+
+
+@app.post("/api/logins/open")
+def login_open(body: LoginOpen) -> dict[str, Any]:
+    """Ouvre le navigateur sur une plateforme pour s'y connecter une fois."""
+    target = next((e for e in logins() if e["domain"] == body.domain), None)
+    if target is None:
+        raise HTTPException(404, f"Aucune offre connue sur {body.domain}.")
+
+    with _ASSIST_LOCK:
+        if _ASSIST["status"] in ("open", "login_required"):
+            raise HTTPException(409, "Un navigateur est déjà ouvert : ferme-le d'abord.")
+        _ASSIST.update(
+            {
+                **_ASSIST_IDLE,
+                "status": "open",
+                "mode": "login",
+                "login_domain": body.domain,
+            }
+        )
+
+    def run() -> None:
+        try:
+            open_application_page(target["url"], settings.chrome_profile)
+            with _ASSIST_LOCK:
+                _ASSIST["status"] = "closed"
+        except Exception as exc:  # noqa: BLE001
+            with _ASSIST_LOCK:
+                _ASSIST["status"] = "error"
+                _ASSIST["error"] = str(exc)
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"opened": True, "domain": body.domain, "url": target["url"]}
+
+
+# ---------------------------------------------------------------------------
+# Reglages LLM et SMTP. Ecrits dans .env (gitignore, jamais commite) puis
+# rechargeables a chaud sans redemarrer `jobot ui` — voir config.reload_settings.
+# Les secrets (cle API, mot de passe SMTP) ne sont jamais renvoyes en clair :
+# seul un booleen "deja defini" sort de l'API.
+
+LLM_PROVIDERS = ["gemini", *LLM_PRESETS.keys(), "openai_compat"]
+SMTP_TLS_MODES = ("starttls", "ssl", "none")
+
+_ENV_KEYS = {
+    "llm_provider": "JOBOT_LLM_PROVIDER",
+    "llm_model": "JOBOT_LLM_MODEL",
+    "llm_base_url": "JOBOT_LLM_BASE_URL",
+    "llm_api_key": "JOBOT_LLM_API_KEY",
+    "smtp_host": "SMTP_HOST",
+    "smtp_port": "SMTP_PORT",
+    "smtp_user": "SMTP_USER",
+    "smtp_password": "SMTP_PASSWORD",
+    "smtp_from": "SMTP_FROM",
+    "smtp_tls": "SMTP_TLS",
+}
+
+
+def _settings_snapshot() -> dict[str, Any]:
+    return {
+        "llm": {
+            "provider": settings.jobot_llm_provider,
+            "model": settings.jobot_llm_model,
+            "base_url": settings.jobot_llm_base_url,
+            "api_key_set": bool(settings.jobot_llm_api_key),
+            "providers": LLM_PROVIDERS,
+        },
+        "smtp": {
+            "host": settings.smtp_host,
+            "port": settings.smtp_port,
+            "user": settings.smtp_user,
+            "from_": settings.smtp_from,
+            "tls": settings.smtp_tls,
+            "tls_modes": list(SMTP_TLS_MODES),
+            "password_set": bool(settings.smtp_password),
+        },
+        "llm_ok": _llm_ok(),
+        "smtp_ok": _smtp_ok(),
+    }
+
+
+@app.get("/api/settings")
+def get_settings() -> dict[str, Any]:
+    return _settings_snapshot()
+
+
+class SettingsUpdate(BaseModel):
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    llm_base_url: str | None = None
+    # Chaine vide = effacement volontaire (distingue de "champ absent" via
+    # model_fields_set plus bas, pas de la valeur elle-meme).
+    llm_api_key: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+    smtp_tls: str | None = None
+
+
+@app.put("/api/settings")
+def update_settings(body: SettingsUpdate) -> dict[str, Any]:
+    sent = body.model_fields_set  # seuls les champs presents dans le JSON recu
+    if not sent:
+        return _settings_snapshot()
+
+    if "llm_provider" in sent and body.llm_provider not in LLM_PROVIDERS:
+        raise HTTPException(422, f"Fournisseur LLM invalide. Valeurs acceptées : {', '.join(LLM_PROVIDERS)}")
+    if "smtp_tls" in sent and body.smtp_tls not in SMTP_TLS_MODES:
+        raise HTTPException(422, f"Mode TLS invalide. Valeurs acceptées : {', '.join(SMTP_TLS_MODES)}")
+
+    values = {
+        _ENV_KEYS[field]: str(getattr(body, field))
+        for field in sent
+        if getattr(body, field) is not None
+    }
+    if values:
+        write_env_values(values)
+        reload_settings()
+    return _settings_snapshot()
 
 
 # ---------------------------------------------------------------------------

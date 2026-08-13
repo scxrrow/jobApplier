@@ -47,7 +47,7 @@ jamais faire sauter la decision humaine (ex : scored → applied directement).
 
 | Fichier | Role | A savoir |
 |---|---|---|
-| `config.py` | `.env` → objet `settings` unique | Tout nouveau reglage passe par ici, jamais `os.environ` direct ailleurs |
+| `config.py` | `.env` → objet `settings` unique | Tout nouveau reglage passe par ici, jamais `os.environ` direct ailleurs. `write_env_values()`/`reload_settings()` permettent l'edition a chaud depuis l'UI (ecran Reglages) — voir *Pieges* |
 | `models.py` | `Offer`, `Channel`, `Status` | `Offer.channel` et `Offer.has_full_description` sont des `@property` calculees, pas des colonnes |
 | `sources/francetravail.py` | Client API officielle (OAuth2) | Pagination `range=0-149`, plafond ~1150/requete. Deux pieges de routage traites dans `parse_offer` — voir *Pieges deja rencontres* |
 | `sources/apec.py` | Scraping des endpoints internes apec.fr | **Pas d'API publique** — anti-bot DataDome, voir docstring du fichier avant d'y toucher |
@@ -55,14 +55,16 @@ jamais faire sauter la decision humaine (ex : scored → applied directement).
 | `db.py` | SQLite : upsert, dedup, transitions de statut | Migrations additives dans `_migrate()` (ALTER TABLE) — jamais de migration destructive |
 | `pipeline.py` | Orchestration complete (fetch → filtre → score → generation → envoi), `SearchParams`, presets `DOMAINES`/`DEPARTEMENTS`, `RunState` | Partage par le CLI et l'UI — toute evolution du flux passe ici, pas en double dans `cli.py`/`web.py` |
 | `web.py` | API FastAPI de `jobot ui` | Routes en `def` synchrone obligatoirement (threadpool) : l'API sync de Playwright plante dans un thread a boucle asyncio |
-| `webui/index.html` | UI web (page unique, vanilla JS) | Design system : `electric-volt-DESIGN.md` a la racine du depot parent |
+| `webui/index.html` | UI web : recherche + validation (vanilla JS) | Design system : `electric-volt-DESIGN.md` a la racine du depot parent |
+| `webui/candidatures.html` | UI web : candidatures envoyees, page separee de la recherche | JS minimal dedie, ne pas re-fusionner dans index.html — voir *Pieges* |
+| `webui/style.css` | CSS partage entre les pages webui | Servi via `StaticFiles` (`/assets/...`) monte dans `web.py` |
 | `cv.py` | Modeles Pydantic du CV maitre + `selectable_ids()` | **Le garde-fou central du projet**, voir invariants ci-dessous |
 | `llm/` | Abstraction fournisseur (`base.py` = contrat) | `gemini.py` et `openai_compat.py` (LM Studio/Ollama/OpenAI/OpenRouter) l'implementent ; jamais d'appel direct a un SDK LLM hors de ce package |
 | `scoring.py` | Note une offre + valide la selection d'id | Rejette tout id hors de `selectable_ids()` avant stockage |
 | `render.py` | CV adapte → HTML (Jinja2) → PDF (Playwright) | `page.emulate_media("print")` obligatoire avant `page.pdf()`. La selection LLM **ordonne** (competences/projets en tete), elle ne **supprime plus** — un CV ampute a ete un bug signale, ne pas reintroduire le filtrage dur |
 | `mailer.py` | Compose et envoie l'email | Corps depuis `templates/email.txt.jinja`, jamais du LLM |
 | `assist.py` | Navigateur assiste (mode manuel du canal `form`) | L'humain fait tout |
-| `autofill.py` | Remplissage + soumission auto des formulaires (mode auto du canal `form`) | Heuristiques best-effort ; navigateur toujours visible ; jamais sans validation par offre — voir invariant 4 |
+| `autofill.py` | Remplissage + soumission auto des formulaires (mode auto du canal `form`) | Heuristiques best-effort ; navigateur toujours visible ; jamais sans validation par offre — voir invariant 4. Sur mur de connexion : pause + reprise, jamais d'abandon ni de mot de passe stocke |
 | `cli.py` | Toutes les commandes `jobot ...` | Fichier le plus gros, point d'assemblage de tout le reste |
 
 ## Invariants — a ne jamais casser sans en discuter explicitement
@@ -108,6 +110,36 @@ reformuler la tache, pas contourner la regle.
 
 ## Pieges deja rencontres (evite de les reintroduire)
 
+- **Ecran d'onboarding qui devient invisible** : la section d'import CV
+  n'etait affichee que quand `cv.present` etait faux (logique d'onboarding),
+  ce qui la rendait injoignable des qu'un CV existait — bug signale par
+  l'utilisateur ("l'import n'existe pas") alors que l'endpoint marchait tres
+  bien cote API. Toute fonctionnalite d'edition/reconfiguration doit rester
+  accessible en permanence (modale ouverte par un bouton/indicateur toujours
+  visible dans la nav), pas seulement pendant un etat "premiere utilisation".
+  Meme logique deja appliquee aux reglages LLM/SMTP (dots cliquables).
+- **Page separee = fichier HTML separe, pas une section masquee** : quand
+  l'utilisateur demande une page differente ("candidatures sur une page a
+  part"), une section togglee par JS sur la meme page ne repond pas au
+  besoin (meme URL, pas de navigation reelle). `candidatures.html` est un
+  document HTML complet avec sa propre route FastAPI (`GET /candidatures`),
+  son propre JS minimal ; seul le CSS est partage (`style.css` extrait pour
+  cette raison). Ne pas re-fusionner en un SPA sans qu'on le demande.
+
+- **Rechargement a chaud de `settings`** : `reload_settings()` mute l'objet
+  `Settings` existant attribut par attribut (`setattr`), au lieu de
+  reassigner `config.settings = Settings()`. Necessaire car chaque module a
+  fait `from .config import settings` — reassigner ne changerait que le nom
+  dans `config.py`, pas les references deja liees ailleurs (pipeline.py,
+  cli.py, web.py...). Toujours muter en place pour un changement de config
+  a chaud, jamais reassigner.
+- **Ecriture de `.env` depuis l'UI** : `write_env_values()` remplace les
+  lignes existantes et preserve tout le reste (commentaires, ordre). Les
+  secrets (cle LLM, mot de passe SMTP) ne sont jamais renvoyes en clair par
+  l'API (`GET /api/settings` expose `*_set: bool`, pas la valeur) — champ
+  vide cote UI = "ne pas changer", jamais "effacer". `.env` est gitignore,
+  verifie avant toute modification de cette logique.
+
 - **Elisions en francais dans les templates** : `"le poste de {{ offer.title }}"`
   et `"au sein de {{ offer.company }}"` cassent des que la variable commence
   par une voyelle ou est un nom propre quelconque. Utiliser des tournures qui
@@ -118,6 +150,60 @@ reformuler la tache, pas contourner la regle.
 - **PDF Playwright sans style d'impression** : `page.pdf()` n'applique pas
   les regles `@media print` par defaut — il faut `page.emulate_media("print")`
   avant, sinon le CSS d'impression du template est ignore silencieusement.
+- **Bandeau cookies = clics impossibles** : le bandeau de consentement recouvre
+  la page et intercepte les clics. Playwright signale l'element comme visible,
+  mais `click()` expire (30 s par defaut !). `_dismiss_banner()` doit tourner
+  avant toute interaction, et les clics portent un `timeout` court — sans ca,
+  une page a 150 elements peut bloquer le thread des dizaines de minutes.
+- **"Postuler" n'est pas toujours un `<button>`** : sur France Travail c'est un
+  `<a href>` ordinaire. `_click_first_match(..., include_links=True)` couvre ce
+  cas. Pour la soumission, les liens ne sont acceptes qu'avec
+  `_SUBMIT_STRICT_RE` : cliquer un lien au hasard contenant "envoyer" serait
+  risque, "Envoyer ma candidature" ne l'est pas.
+- **Une candidature = plusieurs ecrans** : c'est le piege central de
+  `autofill.py`. Sur France Travail connecte, le parcours fait trois ecrans :
+  (1) fiche de l'offre, "Postuler" est un lien ; (2) recapitulatif des criteres
+  **sans aucun champ**, bouton "Envoyer ma candidature" ; (3) "Postuler en
+  ligne" — depot du CV, lettre de motivation **pre-remplie par le site**, case
+  "Je confirme que mes coordonnees sont valides" **non marquee `required`**,
+  bouton sobrement intitule "Envoyer". D'ou, dans cet ordre, chaque piece du
+  dispositif :
+  - `_fill_pass` retourne `(rempli, devoile)` : l'ecran 2 n'a rien a remplir,
+    seul `devoile` distingue "ecran atteint" de "page illisible". Conditionner
+    l'envoi au seul `rempli` faisait abandonner jobot a un clic du but.
+  - `_run_steps` enchaine les ecrans au lieu d'un unique clic, et s'arrete des
+    qu'un clic ne change plus `_page_state` — sinon un formulaire qui ne
+    navigue pas se ferait soumettre `_MAX_STEPS` fois.
+  - Le motif d'envoi passe de `_SUBMIT_STRICT_RE` a `_SUBMIT_RE` des qu'un
+    ecran a ete rempli : "Envoyer" tout court n'est sur qu'une fois qu'on sait
+    etre dans le formulaire.
+  - Les cases a cocher ne peuvent pas se limiter a `[required]` ni au texte du
+    `<label>` associe : d'ou `_CONFIRM_RE` + `_checkbox_text` (qui remonte au
+    parent). Volontairement restreint a la confirmation explicite — pas
+    question de cocher une case "je souhaite recevoir...".
+- **`submitted` ne doit jamais etre optimiste** : un faux "envoye" classe
+  l'offre comme traitee et l'utilisateur n'y revient jamais — c'est l'erreur la
+  plus couteuse du projet. Ne conclure a l'envoi que sur `_looks_sent` (message
+  de confirmation du site) ou sur l'absence de blocage avere. "Il reste un
+  bouton d'envoi" n'est PAS une preuve d'echec (un formulaire soumis en AJAX
+  garde le sien) ; un depot de CV attendu et non satisfait, si — voir
+  `_blocked_on_upload`.
+- **Depot de CV sans `input[type=file]` atteignable** : "Telecharger un CV" sur
+  France Travail ouvre un selecteur de fichier natif. Deux parades
+  complementaires, les deux necessaires : `set_input_files` sur les input
+  masques (le cas courant — ne pas filtrer sur `is_visible()`, ils le sont
+  rarement), et l'interception de l'evenement `filechooser` dans `_attach_cv`
+  quand l'input n'existe pas avant le clic. Le conteneur de l'input doit en
+  revanche etre affiche (`checkVisibility()` sur le parent) : sans ce garde-fou,
+  jobot joint le CV a un formulaire d'un ecran encore cache et croit tenir le
+  bon formulaire sans avoir clique "Postuler".
+- **Mur de connexion : pause, jamais abandon** : `auto_apply` detecte
+  l'authentification requise (`_looks_like_login`, applique seulement si le
+  remplissage a echoue — un lien "Connexion" en en-tete ne suffit pas), signale
+  via `on_login_required`, attend `wait_for_resume()` puis recharge et reprend.
+  Choix delibere : aucun identifiant tiers n'est stocke par jobot, c'est le
+  profil Chrome persistant qui porte les sessions. Ne pas "simplifier" en
+  ajoutant des logins/mots de passe en configuration.
 - **URL de candidature France Travail** : `origineOffre.urlOrigine` mene a la
   fiche sur `candidat.francetravail.fr`, PAS au formulaire — son bouton
   "Postuler" redirige vers le partenaire, ce qui rendait l'automatisation

@@ -7,272 +7,35 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --red: #CC0000;
-    --red-hover: #E60000;
-    --steel: #393C41;
-    --mid: #5C5E62;
-    --bg: #000000;
-    --surface: #111111;
-    --lvl2: #1A1A1A;
-    --lvl3: #222222;
-    --white: #FFFFFF;
-    --text2: #A0A0A0;
-    --border: #2C2C2E;
-    --success: #17B169;
-    --warning: #F5A623;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    background: var(--bg);
-    color: var(--white);
-    font-family: 'Inter', sans-serif;
-    font-size: 14px;
-    line-height: 22px;
-    -webkit-font-smoothing: antialiased;
-  }
-  .container { max-width: 1200px; margin: 0 auto; padding: 0 64px; }
-  @media (max-width: 800px) { .container { padding: 0 24px; } }
-
-  /* ---- Navigation ---- */
-  nav {
-    height: 80px; display: flex; align-items: center;
-    position: sticky; top: 0; background: var(--bg); z-index: 50;
-    border-bottom: 1px solid var(--border);
-  }
-  nav .container { display: flex; align-items: center; justify-content: space-between; width: 100%; }
-  .wordmark { font-size: 18px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; }
-  .wordmark span { color: var(--red); }
-  .env-status { display: flex; gap: 24px; }
-  .env-item { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text2); }
-  .dot { width: 8px; height: 8px; border-radius: 9999px; background: var(--mid); }
-  .dot.ok { background: var(--success); }
-  .dot.ko { background: var(--red); }
-
-  /* ---- Typo ---- */
-  .hero-title { font-size: 56px; line-height: 64px; font-weight: 200; letter-spacing: -0.02em; }
-  @media (max-width: 800px) { .hero-title { font-size: 36px; line-height: 44px; } }
-  .section-title { font-size: 24px; line-height: 32px; font-weight: 600; margin-bottom: 8px; }
-  .subtitle { font-size: 16px; line-height: 26px; color: var(--text2); font-weight: 400; }
-  .label { display: block; font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text2); margin-bottom: 12px; }
-
-  section { padding-top: 96px; }
-  section:last-of-type { padding-bottom: 120px; }
-
-  /* ---- Panels & cards ---- */
-  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 48px; }
-  @media (max-width: 800px) { .panel { padding: 24px; } }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px; transition: border-color 200ms ease; }
-
-  /* ---- Form ---- */
-  .field { margin-bottom: 40px; }
-  input[type="text"], input[type="number"], select {
-    height: 48px; width: 100%; background: var(--surface); color: var(--white);
-    border: 1px solid var(--border); border-radius: 4px; padding: 0 16px;
-    font-family: 'Inter', sans-serif; font-size: 14px; outline: none;
-    transition: border-color 200ms ease;
-  }
-  .panel input[type="text"], .panel input[type="number"], .panel select { background: var(--bg); }
-  input::placeholder { color: var(--mid); }
-  input:focus, select:focus { border-color: var(--white); }
-  select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--mid) 50%), linear-gradient(135deg, var(--mid) 50%, transparent 50%); background-position: calc(100% - 21px) 21px, calc(100% - 16px) 21px; background-size: 5px 5px; background-repeat: no-repeat; }
-
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
-  .chip {
-    border: 1px solid var(--border); border-radius: 4px; background: transparent;
-    color: var(--white); font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 400;
-    padding: 6px 16px; cursor: pointer; transition: all 200ms ease; user-select: none;
-  }
-  .chip:hover { border-color: var(--mid); }
-  .chip.selected { background: var(--white); color: var(--bg); border-color: var(--white); }
-  .chip .x { margin-left: 8px; color: inherit; opacity: .55; }
-
-  .dep-wrap { position: relative; }
-  .dep-menu {
-    position: absolute; top: 52px; left: 0; right: 0; max-height: 264px; overflow-y: auto;
-    background: var(--lvl3); border-radius: 4px; z-index: 40; display: none;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-  }
-  .dep-menu.open { display: block; }
-  .dep-item { padding: 12px 16px; cursor: pointer; display: flex; justify-content: space-between; font-size: 14px; }
-  .dep-item:hover { background: var(--steel); }
-  .dep-item .code { color: var(--text2); font-weight: 500; }
-
-  .form-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; }
-  @media (max-width: 800px) { .form-grid { grid-template-columns: 1fr; } }
-
-  /* ---- Toggle ---- */
-  .toggle-row { display: flex; align-items: flex-start; gap: 16px; padding: 24px; border: 1px solid var(--border); border-radius: 8px; }
-  .toggle { position: relative; width: 48px; height: 28px; flex: none; border-radius: 9999px; background: var(--steel); cursor: pointer; transition: background 200ms ease; border: none; }
-  .toggle::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 9999px; background: var(--white); transition: transform 200ms ease; }
-  .toggle.on { background: var(--red); }
-  .toggle.on::after { transform: translateX(20px); }
-  .toggle-text b { display: block; font-size: 14px; font-weight: 500; margin-bottom: 2px; }
-  .toggle-text small { color: var(--text2); font-size: 13px; line-height: 20px; display: block; }
-  .autonomy-warning { display: none; margin-top: 12px; color: var(--warning); font-size: 13px; }
-  .autonomy-warning.visible { display: block; }
-
-  /* ---- Buttons ---- */
-  .btn {
-    height: 48px; padding: 0 32px; border-radius: 4px; border: none; cursor: pointer;
-    background: var(--red); color: var(--white);
-    font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 500;
-    letter-spacing: 0.05em; text-transform: uppercase;
-    transition: all 200ms ease; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-    text-decoration: none;
-  }
-  .btn:hover { background: var(--red-hover); box-shadow: 0 0 20px rgba(204,0,0,0.2); }
-  .btn:disabled { background: var(--steel); color: var(--mid); cursor: not-allowed; box-shadow: none; }
-  .btn.xl { height: 56px; width: 100%; font-size: 16px; }
-  .btn.secondary { background: transparent; border: 1px solid var(--mid); }
-  .btn.secondary:hover { border-color: var(--white); background: transparent; box-shadow: none; }
-  .btn.tertiary { background: transparent; padding: 0 8px; height: auto; }
-  .btn.tertiary:hover { box-shadow: none; background: transparent; text-decoration: underline; }
-
-  /* ---- Pipeline steps ---- */
-  .steps { display: flex; align-items: flex-start; margin: 48px 0 24px; }
-  .step { flex: 1; text-align: center; position: relative; }
-  .step:not(:last-child)::after {
-    content: ""; position: absolute; top: 7px; left: calc(50% + 16px); right: calc(-50% + 16px);
-    height: 1px; background: var(--border);
-  }
-  .step .bullet { width: 14px; height: 14px; margin: 0 auto 12px; border-radius: 9999px; border: 1px solid var(--mid); background: transparent; transition: all 200ms ease; }
-  .step .name { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mid); }
-  .step.running .bullet { border-color: var(--red); background: var(--red); box-shadow: 0 0 20px rgba(204,0,0,0.5); animation: pulse 1.2s ease-in-out infinite; }
-  .step.running .name { color: var(--white); }
-  .step.done .bullet { border-color: var(--white); background: var(--white); }
-  .step.done .name { color: var(--text2); }
-  .step.waiting .bullet { border-color: var(--warning); background: var(--warning); }
-  .step.waiting .name { color: var(--warning); }
-  .step.error .bullet { border-color: var(--red); background: transparent; }
-  .step.error .name { color: var(--red); }
-  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
-
-  .console {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-    font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 20px;
-    padding: 16px 24px; height: 240px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
-  }
-  .console .info { color: var(--text2); }
-  .console .warn { color: var(--warning); }
-  .console .error { color: var(--red-hover); }
-  .console .success { color: var(--success); }
-  .run-error { color: var(--red-hover); margin-top: 16px; font-size: 14px; display: none; }
-
-  /* ---- Stats ---- */
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; margin-top: 48px; }
-  @media (max-width: 800px) { .stats { grid-template-columns: repeat(2, 1fr); } }
-  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px; text-align: center; }
-  .stat .value { font-size: 36px; line-height: 44px; font-weight: 300; }
-  .stat .name { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text2); margin-top: 4px; }
-
-  /* ---- Offer cards ---- */
-  .offer-list { display: flex; flex-direction: column; gap: 24px; margin-top: 48px; }
-  .offer { display: flex; gap: 32px; align-items: flex-start; }
-  .offer:hover { border-color: var(--mid); }
-  .offer .score { flex: none; width: 96px; text-align: center; }
-  .offer .score .value { font-size: 36px; line-height: 44px; font-weight: 300; }
-  .offer .score .value.low { color: var(--mid); }
-  .offer .score .of { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mid); }
-  .offer .body { flex: 1; min-width: 0; }
-  .offer h3 { font-size: 18px; line-height: 26px; font-weight: 500; margin-bottom: 4px; }
-  .offer .meta-line { color: var(--text2); font-size: 14px; margin-bottom: 12px; }
-  .offer .reason { color: var(--text2); font-size: 13px; line-height: 20px; border-left: 1px solid var(--border); padding-left: 16px; margin-bottom: 16px; }
-  .badge { display: inline-block; border: 1px solid var(--border); border-radius: 2px; padding: 1px 8px; font-size: 11px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text2); margin-left: 12px; vertical-align: 2px; }
-  .badge.email { border-color: var(--success); color: var(--success); }
-  .badge.form { border-color: var(--warning); color: var(--warning); }
-  .badge.applied { border-color: var(--success); color: var(--success); }
-  .offer .actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-  .offer .links { margin-left: auto; display: flex; gap: 16px; }
-  .offer .links a { color: var(--text2); font-size: 13px; text-decoration: none; }
-  .offer .links a:hover { color: var(--white); text-decoration: underline; }
-  .offer .desc { display: none; margin-top: 16px; color: var(--text2); font-size: 13px; line-height: 21px; white-space: pre-wrap; max-height: 320px; overflow-y: auto; }
-  .offer .desc.open { display: block; }
-  @media (max-width: 800px) { .offer { flex-direction: column; gap: 16px; } }
-
-  .empty { color: var(--mid); margin-top: 48px; font-size: 14px; }
-
-  /* ---- Applied list ---- */
-  .applied-rows { margin-top: 48px; border-top: 1px solid var(--border); }
-  .applied-row { display: flex; align-items: center; gap: 24px; min-height: 48px; padding: 8px 8px; border-bottom: 1px solid var(--border); font-size: 14px; }
-  .applied-row:hover { background: var(--surface); }
-  .applied-row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .applied-row .c { color: var(--text2); flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .applied-row .d { color: var(--mid); flex: none; font-size: 13px; }
-
-  /* ---- Modal ---- */
-  .overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: 100;
-    display: none; align-items: center; justify-content: center; padding: 24px;
-  }
-  .overlay.open { display: flex; }
-  .modal { background: var(--lvl2); border-radius: 8px; max-width: 680px; width: 100%; max-height: 86vh; overflow-y: auto; padding: 48px; }
-  @media (max-width: 800px) { .modal { padding: 24px; } }
-  .modal h2 { font-size: 24px; font-weight: 600; margin-bottom: 8px; }
-  .modal .sub { color: var(--text2); margin-bottom: 32px; font-size: 14px; }
-  .kv { border-top: 1px solid var(--border); }
-  .kv-row { display: flex; gap: 24px; min-height: 48px; align-items: center; border-bottom: 1px solid var(--border); padding: 8px 0; }
-  .kv-row .k { width: 130px; flex: none; color: var(--text2); font-size: 13px; }
-  .kv-row .v { flex: 1; font-size: 14px; font-weight: 500; word-break: break-all; }
-  .mailbody { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 20px; white-space: pre-wrap; margin: 24px 0 32px; max-height: 260px; overflow-y: auto; color: var(--text2); }
-  .modal .row { display: flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap; }
-  .modal .note { color: var(--warning); font-size: 13px; margin-bottom: 24px; }
-
-  textarea {
-    width: 100%; min-height: 180px; background: var(--bg); color: var(--white);
-    border: 1px solid var(--border); border-radius: 4px; padding: 16px;
-    font-family: 'JetBrains Mono', monospace; font-size: 12px; outline: none; resize: vertical;
-  }
-  textarea:focus { border-color: var(--white); }
-
-  /* ---- Toast ---- */
-  #toasts { position: fixed; right: 24px; bottom: 24px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
-  .toast { background: var(--lvl3); color: var(--white); border-radius: 4px; padding: 12px 20px; font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); max-width: 420px; }
-  .toast.error { border-left: 2px solid var(--red); }
-  .toast.success { border-left: 2px solid var(--success); }
-
-  .hidden { display: none !important; }
-</style>
+<link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
 
 <nav>
   <div class="container">
-    <div class="wordmark">JOB<span>O</span>T</div>
+    <a href="/" class="wordmark">JOB<span>O</span>T</a>
     <div class="env-status">
-      <div class="env-item"><span class="dot" id="dot-cv"></span>CV</div>
-      <div class="env-item"><span class="dot" id="dot-llm"></span>LLM</div>
-      <div class="env-item"><span class="dot" id="dot-smtp"></span>SMTP</div>
+      <div class="nav-links">
+        <a href="/candidatures" class="nav-link">Candidatures</a>
+      </div>
+      <button type="button" class="env-item env-item-btn" id="dot-cv-btn"><span class="dot" id="dot-cv"></span>CV</button>
+      <button type="button" class="env-item env-item-btn" id="dot-llm-btn"><span class="dot" id="dot-llm"></span>LLM</button>
+      <button type="button" class="env-item env-item-btn" id="dot-smtp-btn"><span class="dot" id="dot-smtp"></span>SMTP</button>
+      <button type="button" class="btn tertiary" id="settings-btn" style="font-size:12px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text2)">Réglages</button>
     </div>
   </div>
 </nav>
 
-<!-- ============ CV manquant : onboarding ============ -->
-<section id="cv-section" class="hidden">
+<!-- ============ CV manquant : invite compacte ============ -->
+<section id="cv-missing-section" class="hidden">
   <div class="container">
     <h1 class="hero-title">Commençons par<br>ton CV.</h1>
-    <p class="subtitle" style="margin:24px 0 48px; max-width:560px">
+    <p class="subtitle" style="margin:24px 0 40px; max-width:560px">
       jobot adapte ton CV à chaque offre sans jamais rien inventer : il ne fait que
-      sélectionner des éléments de ton CV maître. Importe ton CV existant (HTML ou texte)
-      pour le construire automatiquement.
+      sélectionner des éléments de ton CV maître. Importe ton CV existant pour le
+      construire automatiquement.
     </p>
-    <div class="panel" style="max-width:720px">
-      <div class="field">
-        <label class="label">Fichier CV (.html, .txt)</label>
-        <input type="file" id="cv-file" accept=".html,.htm,.txt,.md" style="color:var(--text2)">
-      </div>
-      <div class="field">
-        <label class="label">Ou colle le texte de ton CV</label>
-        <textarea id="cv-text" placeholder="Colle ici le contenu de ton CV…"></textarea>
-      </div>
-      <button class="btn xl" id="cv-import-btn">Importer mon CV</button>
-      <p class="subtitle" style="font-size:13px; margin-top:24px">
-        L'extraction est faite par le LLM configuré : relis toujours le résultat
-        (data/master-cv.json) avant d'envoyer de vraies candidatures.
-      </p>
-    </div>
+    <button class="btn xl" style="max-width:320px" id="cv-missing-btn">Importer mon CV</button>
   </div>
 </section>
 
@@ -403,11 +166,16 @@
   </div>
 </section>
 
-<!-- ============ Envoyées ============ -->
-<section id="applied-section" class="hidden">
+<!-- ============ Connexions ============ -->
+<section id="logins-section" class="hidden">
   <div class="container">
-    <h2 class="section-title">Candidatures envoyées</h2>
-    <div class="applied-rows" id="applied-rows"></div>
+    <h2 class="section-title">Connexions aux plateformes</h2>
+    <p class="subtitle">
+      Certains sites exigent un compte pour postuler. La connexion vaut pour toutes
+      les offres du site et reste valable d'une session à l'autre : connecte-toi une
+      fois ici, et les candidatures suivantes ne seront plus interrompues.
+    </p>
+    <div class="applied-rows" id="logins-rows"></div>
   </div>
 </section>
 
@@ -437,6 +205,10 @@
     <p class="sub" id="assist-sub"></p>
     <div class="kv hidden" id="assist-report"></div>
     <div class="kv" id="assist-kv"></div>
+    <div class="row hidden" style="margin-top:32px" id="assist-login-row">
+      <span class="subtitle" style="font-size:14px; margin-right:auto; color:var(--warning)" id="assist-login-text"></span>
+      <button class="btn" id="assist-resume">J'ai fini, reprends</button>
+    </div>
     <div class="row" style="margin-top:32px" id="assist-wait-row">
       <span class="subtitle" style="font-size:13px; margin-right:auto" id="assist-wait-text">En attente de la fermeture du navigateur…</span>
       <a class="btn tertiary" id="assist-pdf" target="_blank">Voir le CV</a>
@@ -446,6 +218,92 @@
       <button class="btn secondary" id="assist-no">Pas encore</button>
       <button class="btn" id="assist-yes">Oui, envoyée</button>
     </div>
+  </div>
+</div>
+
+<!-- ============ Modale : réglages LLM + SMTP ============ -->
+<div class="overlay" id="settings-overlay">
+  <div class="modal">
+    <h2>Réglages</h2>
+    <p class="sub">
+      Écrits dans le fichier <code style="font-family:'JetBrains Mono',monospace">.env</code> du
+      projet (jamais versionné) et actifs immédiatement, sans redémarrer jobot.
+    </p>
+
+    <label class="label" style="margin-top:8px">Fournisseur LLM — scoring des offres et import de CV</label>
+    <div class="form-grid" style="grid-template-columns:1fr 1fr; margin-bottom:16px">
+      <div>
+        <select id="set-llm-provider"></select>
+      </div>
+      <div>
+        <input type="text" id="set-llm-model" placeholder="Modèle (ex : gemini-flash-latest)">
+      </div>
+    </div>
+    <div class="form-grid hidden" id="set-llm-baseurl-row" style="grid-template-columns:1fr; margin-bottom:16px">
+      <input type="text" id="set-llm-baseurl" placeholder="URL de base de l'API (ex : https://mon-serveur/v1)">
+    </div>
+    <div class="form-grid" style="grid-template-columns:1fr; margin-bottom:32px">
+      <input type="text" id="set-llm-key" placeholder="Clé API — laisse vide pour ne pas la changer">
+    </div>
+
+    <label class="label">SMTP — envoi automatique des candidatures par email</label>
+    <div class="form-grid" style="grid-template-columns:2fr 1fr; margin-bottom:16px">
+      <input type="text" id="set-smtp-host" placeholder="Hôte (ex : smtp.gmail.com)">
+      <input type="number" id="set-smtp-port" placeholder="Port">
+    </div>
+    <div class="form-grid" style="grid-template-columns:1fr 1fr; margin-bottom:16px">
+      <input type="text" id="set-smtp-user" placeholder="Utilisateur">
+      <input type="text" id="set-smtp-password" placeholder="Mot de passe — laisse vide pour ne pas le changer">
+    </div>
+    <div class="form-grid" style="grid-template-columns:1fr 1fr; margin-bottom:32px">
+      <input type="text" id="set-smtp-from" placeholder="Adresse d'expédition — optionnel">
+      <select id="set-smtp-tls">
+        <option value="starttls">STARTTLS (port 587)</option>
+        <option value="ssl">SSL implicite (port 465)</option>
+        <option value="none">Aucun (relais local)</option>
+      </select>
+    </div>
+
+    <p class="subtitle" style="font-size:13px; margin-bottom:24px">
+      Gmail / Outlook : utilise un mot de passe d'application, jamais le mot de passe du compte.
+    </p>
+
+    <div class="row">
+      <button class="btn secondary" data-close>Fermer</button>
+      <button class="btn" id="settings-save">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ Modale : CV maître ============ -->
+<div class="overlay" id="cv-overlay">
+  <div class="modal">
+    <h2>Ton CV maître</h2>
+    <p class="sub">
+      jobot ne fait que sélectionner des éléments de ce CV pour chaque offre —
+      il n'en invente jamais. Importer un nouveau fichier remplace intégralement
+      le CV actuel.
+    </p>
+
+    <div class="kv hidden" id="cv-current" style="margin-bottom:32px"></div>
+
+    <div class="field">
+      <label class="label">Fichier CV (.html, .txt)</label>
+      <input type="file" id="cv-file" accept=".html,.htm,.txt,.md" style="color:var(--text2)">
+    </div>
+    <div class="field">
+      <label class="label">Ou colle le texte de ton CV</label>
+      <textarea id="cv-text" placeholder="Colle ici le contenu de ton CV…"></textarea>
+    </div>
+
+    <div class="row">
+      <button class="btn secondary" data-close>Fermer</button>
+      <button class="btn" id="cv-import-btn">Importer ce CV</button>
+    </div>
+    <p class="subtitle" style="font-size:13px; margin-top:24px">
+      L'extraction est faite par le LLM configuré : relis toujours le résultat
+      (data/master-cv.json) avant d'envoyer de vraies candidatures.
+    </p>
   </div>
 </div>
 
@@ -481,6 +339,7 @@ const state = {
   assistOffer: null,
   assistMode: "auto",
   applyOffer: null,
+  loginPending: false,
 };
 
 function toast(msg, kind = "info") {
@@ -802,23 +661,13 @@ function offerCard(o) {
 }
 
 async function refreshOffers() {
-  const [pending, applied] = await Promise.all([
-    api("/api/offers?statuts=scored,queued&limite=200"),
-    api("/api/offers?statuts=applied&limite=100"),
-  ]);
+  const pending = await api("/api/offers?statuts=scored,queued&limite=200");
 
   $("validate-section").classList.remove("hidden");
   $("offer-list").innerHTML = pending.map(offerCard).join("");
   $("offer-empty").classList.toggle("hidden", pending.length > 0);
 
-  $("applied-section").classList.toggle("hidden", applied.length === 0);
-  $("applied-rows").innerHTML = applied.map((o) => `
-    <div class="applied-row">
-      <span class="badge applied">envoyée</span>
-      <span class="t">${esc(o.title)}</span>
-      <span class="c">${esc(o.company || "—")}</span>
-      <span class="d">${o.applied_at ? new Date(o.applied_at).toLocaleDateString("fr-FR") : ""}</span>
-    </div>`).join("");
+  refreshLogins();
 
   for (const btn of document.querySelectorAll("[data-act]")) {
     const id = btn.dataset.id;
@@ -943,10 +792,32 @@ function renderAssistReport(report) {
 }
 
 function handleAssistState(assist) {
+  // Navigateur ouvert depuis l'écran Connexions : aucune candidature en jeu.
+  if (assist.mode === "login") {
+    if (state.loginPending && (assist.status === "closed" || assist.status === "error")) {
+      state.loginPending = false;
+      toast(assist.status === "error"
+        ? "Connexion : " + (assist.error || "erreur")
+        : "Session enregistrée dans le profil du navigateur.",
+        assist.status === "error" ? "error" : "success");
+      api("/api/assist/done", { method: "POST", body: JSON.stringify({ applied: false }) }).catch(() => {});
+    }
+    return;
+  }
   if (!state.assistOffer) return;
   if (assist.report && state.assistMode === "auto" && !$("assist-report").innerHTML) {
     renderAssistReport(assist.report);
   }
+
+  const waitingLogin = assist.status === "login_required";
+  $("assist-login-row").classList.toggle("hidden", !waitingLogin);
+  $("assist-wait-row").classList.toggle("hidden", waitingLogin || assist.status === "closed");
+  if (waitingLogin) {
+    $("assist-login-text").textContent =
+      `${assist.login_domain || "Ce site"} demande une connexion. Connecte-toi dans la ` +
+      "fenêtre déjà ouverte, puis clique ci-contre : jobot reprendra la candidature.";
+  }
+
   if (assist.status === "closed") {
     $("assist-wait-row").classList.add("hidden");
     $("assist-done-row").classList.remove("hidden");
@@ -959,6 +830,46 @@ function handleAssistState(assist) {
   }
 }
 
+async function assistResume() {
+  const btn = $("assist-resume");
+  btn.disabled = true;
+  try {
+    await api("/api/assist/resume", { method: "POST" });
+    $("assist-login-row").classList.add("hidden");
+    $("assist-wait-row").classList.remove("hidden");
+    $("assist-wait-text").textContent = "Reprise du remplissage…";
+  } catch (e) {
+    toast(e.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function refreshLogins() {
+  let rows = [];
+  try { rows = await api("/api/logins"); } catch (e) { return; }
+  $("logins-section").classList.toggle("hidden", rows.length === 0);
+  $("logins-rows").innerHTML = rows.map((r) => `
+    <div class="applied-row">
+      <span class="t">${esc(r.domain)}</span>
+      <span class="c">${r.offers} offre${r.offers > 1 ? "s" : ""}</span>
+      <button class="btn secondary" style="height:36px; padding:0 20px"
+              data-login="${esc(r.domain)}">Se connecter</button>
+    </div>`).join("");
+  for (const btn of document.querySelectorAll("[data-login]")) {
+    btn.onclick = () => openLogin(btn.dataset.login);
+  }
+}
+
+async function openLogin(domain) {
+  try {
+    await api("/api/logins/open", { method: "POST", body: JSON.stringify({ domain }) });
+    state.loginPending = true;
+    toast(`Navigateur ouvert sur ${domain} — connecte-toi, puis ferme la fenêtre.`, "success");
+    poll(true);
+  } catch (e) { toast(e.message, "error"); }
+}
+
 async function assistFinish(applied) {
   try {
     await api("/api/assist/done", { method: "POST", body: JSON.stringify({ applied }) });
@@ -969,7 +880,25 @@ async function assistFinish(applied) {
   poll();
 }
 
-/* ---- Import CV ---- */
+/* ---- CV maître (modale, toujours accessible) ---- */
+
+function openCvModal() {
+  const cv = state.meta.cv;
+  const current = $("cv-current");
+  if (cv && cv.present && cv.valid !== false) {
+    current.classList.remove("hidden");
+    current.innerHTML = `
+      <div class="kv-row"><span class="k">Nom</span><span class="v">${esc(cv.name)}</span></div>
+      <div class="kv-row"><span class="k">Intitulé</span><span class="v">${esc(cv.headline)}</span></div>
+      <div class="kv-row"><span class="k">Éléments sélectionnables</span><span class="v">${cv.selectable_ids}</span></div>`;
+  } else {
+    current.classList.add("hidden");
+    current.innerHTML = "";
+  }
+  $("cv-file").value = "";
+  $("cv-text").value = "";
+  $("cv-overlay").classList.add("open");
+}
 
 async function importCv() {
   const fileInput = $("cv-file");
@@ -981,6 +910,11 @@ async function importCv() {
   }
   if (!content.trim()) return toast("Choisis un fichier ou colle le texte de ton CV.", "error");
 
+  const hadCv = state.meta.cv && state.meta.cv.present;
+  if (hadCv && !confirm(
+    "Un CV maître existe déjà. L'importer va le remplacer intégralement — continuer ?"
+  )) return;
+
   const btn = $("cv-import-btn");
   btn.disabled = true;
   btn.textContent = "Extraction par le LLM…";
@@ -989,14 +923,90 @@ async function importCv() {
       method: "POST",
       body: JSON.stringify({ content, filename, force: true }),
     });
-    toast(`CV maître créé pour ${cv.name}. Relis data/master-cv.json !`, "success");
+    toast(`CV maître ${hadCv ? "remplacé" : "créé"} pour ${cv.name}. Relis data/master-cv.json !`, "success");
     state.meta.cv = cv;
     showSections();
+    $("cv-overlay").classList.remove("open");
   } catch (e) {
     toast(e.message, "error");
   } finally {
     btn.disabled = false;
-    btn.textContent = "Importer mon CV";
+    btn.textContent = "Importer ce CV";
+  }
+}
+
+/* ================= Réglages ================= */
+
+function fillProviderSelect(select, providers, current) {
+  select.innerHTML = providers.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+  select.value = current;
+}
+
+function toggleBaseUrlRow() {
+  $("set-llm-baseurl-row").classList.toggle("hidden", $("set-llm-provider").value !== "openai_compat");
+}
+
+async function openSettings() {
+  let data;
+  try {
+    data = await api("/api/settings");
+  } catch (e) {
+    return toast(e.message, "error");
+  }
+
+  fillProviderSelect($("set-llm-provider"), data.llm.providers, data.llm.provider);
+  $("set-llm-model").value = data.llm.model || "";
+  $("set-llm-baseurl").value = data.llm.base_url || "";
+  $("set-llm-key").value = "";
+  $("set-llm-key").placeholder = data.llm.api_key_set
+    ? "Clé API déjà enregistrée — laisse vide pour ne pas la changer"
+    : "Clé API — aucune enregistrée";
+  toggleBaseUrlRow();
+
+  $("set-smtp-host").value = data.smtp.host || "";
+  $("set-smtp-port").value = data.smtp.port || "";
+  $("set-smtp-user").value = data.smtp.user || "";
+  $("set-smtp-password").value = "";
+  $("set-smtp-password").placeholder = data.smtp.password_set
+    ? "Mot de passe déjà enregistré — laisse vide pour ne pas le changer"
+    : "Mot de passe — aucun enregistré";
+  $("set-smtp-from").value = data.smtp.from_ || "";
+  $("set-smtp-tls").value = data.smtp.tls || "starttls";
+
+  $("settings-overlay").classList.add("open");
+}
+
+async function saveSettings() {
+  const payload = {
+    llm_provider: $("set-llm-provider").value,
+    llm_model: $("set-llm-model").value,
+    llm_base_url: $("set-llm-baseurl").value,
+    smtp_host: $("set-smtp-host").value,
+    smtp_port: parseInt($("set-smtp-port").value, 10) || 0,
+    smtp_user: $("set-smtp-user").value,
+    smtp_from: $("set-smtp-from").value,
+    smtp_tls: $("set-smtp-tls").value,
+  };
+  const llmKey = $("set-llm-key").value.trim();
+  if (llmKey) payload.llm_api_key = llmKey;
+  const smtpPass = $("set-smtp-password").value;
+  if (smtpPass) payload.smtp_password = smtpPass;
+
+  const btn = $("settings-save");
+  btn.disabled = true;
+  btn.textContent = "Enregistrement…";
+  try {
+    const data = await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
+    state.meta.llm_ok = data.llm_ok;
+    state.meta.smtp_ok = data.smtp_ok;
+    showSections();
+    toast("Réglages enregistrés.", "success");
+    $("settings-overlay").classList.remove("open");
+  } catch (e) {
+    toast(e.message, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Enregistrer";
   }
 }
 
@@ -1004,7 +1014,7 @@ async function importCv() {
 
 function showSections() {
   const cvOk = state.meta.cv.present && state.meta.cv.valid !== false;
-  $("cv-section").classList.toggle("hidden", cvOk);
+  $("cv-missing-section").classList.toggle("hidden", cvOk);
   $("search-section").classList.toggle("hidden", !cvOk);
   if (cvOk) {
     $("cv-line").textContent =
@@ -1027,9 +1037,17 @@ async function init() {
   initForm();
   showSections();
   $("cv-import-btn").onclick = importCv;
+  $("dot-cv-btn").onclick = openCvModal;
+  $("cv-missing-btn").onclick = openCvModal;
   $("apply-confirm").onclick = confirmApply;
   $("assist-yes").onclick = () => assistFinish(true);
   $("assist-no").onclick = () => assistFinish(false);
+  $("assist-resume").onclick = assistResume;
+  $("settings-btn").onclick = openSettings;
+  $("dot-llm-btn").onclick = openSettings;
+  $("dot-smtp-btn").onclick = openSettings;
+  $("settings-save").onclick = saveSettings;
+  $("set-llm-provider").onchange = toggleBaseUrlRow;
   for (const el of document.querySelectorAll("[data-close]")) {
     el.onclick = () => el.closest(".overlay").classList.remove("open");
   }

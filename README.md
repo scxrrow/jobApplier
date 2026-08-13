@@ -19,9 +19,18 @@ uv run jobot ui        # ouvre http://127.0.0.1:8321 dans ton navigateur
 C'est la façon la plus simple d'utiliser jobot, pensée pour fonctionner sans
 toucher au terminal une fois lancée :
 
-1. **Pas encore de CV maître ?** L'interface te propose d'importer ton CV
-   existant (fichier HTML/texte ou copier-coller) — l'extraction est faite
-   par le LLM configuré. Relis toujours `data/master-cv.json` ensuite.
+0. **Pas encore de LLM ou de SMTP configuré ?** Le bouton **Réglages** (en
+   haut à droite, ou en cliquant directement sur les indicateurs LLM/SMTP)
+   ouvre un formulaire pour les renseigner sans toucher au terminal —
+   fournisseur LLM, modèle, clé API, puis hôte/identifiants SMTP. Écrit dans
+   `.env` (jamais versionné) et actif immédiatement, sans redémarrer jobot.
+1. **Pas encore de CV maître ?** L'indicateur **CV** dans la nav (ou le
+   bouton *Importer mon CV* affiché tant qu'aucun CV n'existe) ouvre une
+   modale pour l'importer — fichier HTML/texte ou copier-coller, extraction
+   faite par le LLM configuré. **Cet indicateur reste cliquable en
+   permanence** : tu peux ré-importer un CV à tout moment pour remplacer
+   l'actuel (une confirmation te le demande, l'écrasement est immédiat et
+   sans historique). Relis toujours `data/master-cv.json` après un import.
 2. **Choisis tes critères** : département(s), type de contrat (alternance,
    CDI, CDD, stage, intérim), intitulés de poste en saisie libre
    (« technicien support », « chargé de recrutement »…) et mots-clés.
@@ -36,6 +45,10 @@ toucher au terminal une fois lancée :
    remplissage est heuristique : selon le site, il peut rester des champs à
    compléter, la fenêtre te le montre). Le toggle « candidature
    automatique » repasse en mode 100 % manuel si tu préfères.
+5. **Retrouve tes candidatures envoyées** sur une page dédiée, **Candidatures**
+   (lien dans la nav, `/candidatures`) — séparée de la recherche pour ne pas
+   l'encombrer. Toutes les offres marquées `applied`, les plus récentes en
+   premier.
 
 **Le mode autonome** (interrupteur « validation humaine » désactivé) envoie
 tout seul les candidatures email dont le score dépasse le seuil choisi.
@@ -213,12 +226,12 @@ message.
 
 - **Automatique** (par défaut) : après ta validation de l'offre, Playwright
   ouvre un navigateur visible à profil persistant (tes sessions restent
-  connectées d'une candidature à l'autre), remplit les champs qu'il reconnaît
-  (nom, prénom, email, téléphone, message — issu du template email, jamais du
-  LLM), joint le CV PDF et clique sur envoyer. Le remplissage est heuristique :
-  connexion requise, captcha ou formulaire non standard, et il te laisse la
-  main en te disant pourquoi. Rien ne se passe en arrière-plan : tu vois tout,
-  tu peux corriger avant que ça parte.
+  connectées d'une candidature à l'autre), ferme le bandeau cookies, remplit
+  les champs qu'il reconnaît (nom, prénom, email, téléphone, message — issu du
+  template email, jamais du LLM), joint le CV PDF et clique sur envoyer. Le
+  remplissage est heuristique : sur un captcha ou un formulaire non standard,
+  il te laisse la main en te disant pourquoi. Rien ne se passe en
+  arrière-plan : tu vois tout, tu peux corriger avant que ça parte.
 - **Manuel** (`jobot assist <id>` en CLI, ou toggle désactivé dans l'UI) :
   le navigateur s'ouvre sur l'offre avec les informations à recopier, tu
   remplis et tu cliques toi-même.
@@ -227,11 +240,32 @@ Dans les deux cas, à la fermeture du navigateur, jobot te demande si la
 candidature est partie pour mettre à jour le statut — la détection
 automatique du succès n'étant jamais fiable, c'est toi qui confirmes.
 
+### Les sites qui exigent un compte
+
+Certaines plateformes (France Travail au premier chef) ne montrent leur
+formulaire qu'à un utilisateur connecté. jobot **n'abandonne pas** dans ce
+cas : il détecte le mur d'authentification, met la candidature en pause et
+te l'annonce dans l'interface. Tu te connectes dans la fenêtre déjà ouverte,
+tu cliques sur *J'ai fini, reprends*, et le remplissage repart où il s'était
+arrêté.
+
+jobot ne stocke aucun mot de passe : c'est le profil Chrome persistant
+(`chrome-profile/`) qui conserve la session, exactement comme ton navigateur
+habituel. Comme le mur est par site et non par offre, une connexion vaut pour
+toutes les offres de la plateforme et pour les sessions suivantes.
+
+La section **Connexions aux plateformes** de l'interface liste les sites
+présents dans tes offres en attente, avec le nombre d'offres concernées et un
+bouton pour t'y connecter d'avance — de quoi préparer une série de
+candidatures sans interruption.
+
 ## Choix du LLM
 
 Aucun fournisseur n'est imposé : tout se règle dans `.env`, sans toucher au
-code. LM Studio, Ollama, vLLM, OpenAI et OpenRouter parlent tous le format
-d'API d'OpenAI, donc un seul client les couvre tous.
+code — directement en éditant le fichier, ou depuis l'écran **Réglages** de
+l'UI (voir *L'interface web*), qui écrit dans ce même fichier et recharge la
+config à chaud. LM Studio, Ollama, vLLM, OpenAI et OpenRouter parlent tous le
+format d'API d'OpenAI, donc un seul client les couvre tous.
 
 | `JOBOT_LLM_PROVIDER` | `JOBOT_LLM_BASE_URL` | Clé requise |
 |---|---|---|
@@ -322,7 +356,7 @@ Dans l'ordre où les données y circulent :
 | `models.py` | `Offer`, `Channel`, `Status` — le schéma d'une offre et son cycle de vie |
 | `pipeline.py` | Orchestration du pipeline complet (fetch → filtre → score → génération → envoi), presets domaines/départements, état d'exécution partagé avec l'UI |
 | `web.py` | API FastAPI locale de `jobot ui` (recherche, validation, assistant, import CV) |
-| `webui/` | L'interface web (page unique, design Electric Volt) |
+| `webui/` | L'interface web, design Electric Volt : `index.html` (recherche + validation), `candidatures.html` (candidatures envoyées), `style.css` partagé |
 | `sources/francetravail.py` | Client OAuth2 + pagination pour l'API France Travail |
 | `sources/apec.py` | Client de la recherche apec.fr (pas d'API publique — voir *Les sources d'offres*) |
 | `filters.py` | Filtrage à règles, sans appel LLM |
@@ -359,3 +393,4 @@ Dans l'ordre où les données y circulent :
   d'offres*), ce qui rend leur scoring moins fin que celui des offres France
   Travail.
 - Pas de relance automatique après candidature.
+
