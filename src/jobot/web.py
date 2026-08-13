@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from . import db, pipeline
 from .assist import apply_url as offer_apply_url
 from .assist import clipboard_fields, open_application_page
+from .autofill import auto_apply
 from .config import settings
 from .cv import extract_master_cv, html_to_text, load_master_cv, save_master_cv
 from .llm import LLMError, build_client
@@ -136,10 +137,6 @@ def meta() -> dict[str, Any]:
         )
     return {
         "departements": [{"code": c, "nom": n} for c, n in pipeline.DEPARTEMENTS],
-        "domaines": [
-            {"id": key, "label": val["label"], "mots_cles": val["mots_cles"]}
-            for key, val in pipeline.DOMAINES.items()
-        ],
         "contrats": pipeline.CONTRACT_TYPES,
         "sources": list(pipeline.SOURCE_NAMES),
         "defaults": saved.model_dump(),
@@ -156,7 +153,7 @@ def search(params: pipeline.SearchParams) -> dict[str, Any]:
     if not params.departements:
         raise HTTPException(422, "Choisis au moins un département.")
     if not params.keywords():
-        raise HTTPException(422, "Choisis au moins un type de poste ou un mot-clé.")
+        raise HTTPException(422, "Indique au moins un intitulé de poste ou un mot-clé.")
     unknown = [s for s in params.sources if s not in pipeline.SOURCE_NAMES]
     if unknown or not params.sources:
         raise HTTPException(422, "Sources invalides.")
@@ -320,11 +317,21 @@ def _cv_file(offer_id: str, kind: str) -> FileResponse:
 
 
 # ---------------------------------------------------------------------------
-# Assistant navigateur (canal `form`). Un seul a la fois : Playwright ouvre un
-# Chromium visible sur le poste, l'humain remplit et clique — jamais jobot.
+# Candidature par formulaire (canal `form`). Un seul navigateur a la fois.
+# Deux modes, choisis par l'utilisateur : automatique (Playwright remplit et
+# soumet, apres la validation de l'offre — le navigateur reste visible) ou
+# manuel (la page s'ouvre, l'humain fait tout).
 
 _ASSIST_LOCK = threading.Lock()
-_ASSIST: dict[str, Any] = {"offer_id": None, "status": "idle", "error": None, "fields": []}
+_ASSIST_IDLE: dict[str, Any] = {
+    "offer_id": None,
+    "status": "idle",
+    "error": None,
+    "fields": [],
+    "mode": "manual",
+    "report": None,
+}
+_ASSIST: dict[str, Any] = dict(_ASSIST_IDLE)
 
 
 def _assist_snapshot() -> dict[str, Any]:
@@ -332,9 +339,23 @@ def _assist_snapshot() -> dict[str, Any]:
         return dict(_ASSIST)
 
 
-def _assist_thread(url: str) -> None:
+def _assist_thread(url: str, *, auto: bool, cv, pdf_path, message: str) -> None:
     try:
-        open_application_page(url, settings.chrome_profile)
+        if auto:
+            def on_report(report) -> None:
+                with _ASSIST_LOCK:
+                    _ASSIST["report"] = report.as_dict()
+
+            auto_apply(
+                url,
+                cv=cv,
+                pdf_path=pdf_path,
+                message=message,
+                profile_dir=settings.chrome_profile,
+                on_report=on_report,
+            )
+        else:
+            open_application_page(url, settings.chrome_profile)
         with _ASSIST_LOCK:
             _ASSIST["status"] = "closed"
     except Exception as exc:  # noqa: BLE001
@@ -343,20 +364,26 @@ def _assist_thread(url: str) -> None:
             _ASSIST["error"] = str(exc)
 
 
+class AssistStart(BaseModel):
+    # None : suivre la preference form_auto memorisee avec la recherche.
+    auto: bool | None = None
+
+
 @app.post("/api/offers/{offer_id}/assist")
-def assist_offer(offer_id: str) -> dict[str, Any]:
+def assist_offer(offer_id: str, body: AssistStart | None = None) -> dict[str, Any]:
     conn = _conn()
     try:
         row = _get_row(conn, offer_id)
         if not row["cv_selection"]:
             raise HTTPException(400, "Offre pas encore scorée.")
-        url = offer_apply_url(pipeline.offer_from_row(row))
+        offer = pipeline.offer_from_row(row)
+        url = offer_apply_url(offer)
         if not url:
             raise HTTPException(400, "Aucune URL de candidature pour cette offre.")
 
         with _ASSIST_LOCK:
             if _ASSIST["status"] == "open":
-                raise HTTPException(409, "Un assistant est déjà ouvert : ferme-le d'abord.")
+                raise HTTPException(409, "Un navigateur de candidature est déjà ouvert : ferme-le d'abord.")
 
         try:
             cv = load_master_cv(settings.cv_path)
@@ -370,11 +397,36 @@ def assist_offer(offer_id: str) -> dict[str, Any]:
     finally:
         conn.close()
 
+    if body is not None and body.auto is not None:
+        auto = body.auto
+    else:
+        saved = pipeline.load_ui_params()
+        auto = saved.form_auto if saved else True
+
     fields = [{"label": lab, "value": val} for lab, val in clipboard_fields(cv, pdf_path)]
     with _ASSIST_LOCK:
-        _ASSIST.update({"offer_id": offer_id, "status": "open", "error": None, "fields": fields})
-    threading.Thread(target=_assist_thread, args=(url,), daemon=True).start()
-    return {"opened": True, "url": url, "fields": fields}
+        _ASSIST.update(
+            {
+                "offer_id": offer_id,
+                "status": "open",
+                "error": None,
+                "fields": fields,
+                "mode": "auto" if auto else "manual",
+                "report": None,
+            }
+        )
+    threading.Thread(
+        target=_assist_thread,
+        args=(url,),
+        kwargs={
+            "auto": auto,
+            "cv": cv,
+            "pdf_path": pdf_path,
+            "message": build_body(cv, offer),
+        },
+        daemon=True,
+    ).start()
+    return {"opened": True, "url": url, "fields": fields, "mode": "auto" if auto else "manual"}
 
 
 class AssistDone(BaseModel):
@@ -383,10 +435,10 @@ class AssistDone(BaseModel):
 
 @app.post("/api/assist/done")
 def assist_done(body: AssistDone) -> dict[str, Any]:
-    """L'utilisateur repond a « candidature envoyée ? » apres l'assistant."""
+    """L'utilisateur repond a « candidature envoyée ? » apres le navigateur."""
     with _ASSIST_LOCK:
         offer_id = _ASSIST["offer_id"]
-        _ASSIST.update({"offer_id": None, "status": "idle", "error": None, "fields": []})
+        _ASSIST.update(dict(_ASSIST_IDLE))
     if offer_id and body.applied:
         conn = _conn()
         try:

@@ -23,21 +23,26 @@ toucher au terminal une fois lancée :
    existant (fichier HTML/texte ou copier-coller) — l'extraction est faite
    par le LLM configuré. Relis toujours `data/master-cv.json` ensuite.
 2. **Choisis tes critères** : département(s), type de contrat (alternance,
-   CDI, CDD, stage, intérim), type de poste (support technique, systèmes &
-   réseaux, RH, compta…) et mots-clés libres. Tes derniers critères sont
-   mémorisés (`data/ui-params.json`).
+   CDI, CDD, stage, intérim), intitulés de poste en saisie libre
+   (« technicien support », « chargé de recrutement »…) et mots-clés.
+   Tes derniers critères sont mémorisés (`data/ui-params.json`).
 3. **Lance.** Tout s'enchaîne automatiquement : récupération, filtrage,
    scoring LLM, génération des CV adaptés — jusqu'à l'écran de validation.
-4. **Valide.** Chaque candidature attend ta décision : pour le canal email,
-   tu vois le destinataire, l'objet, le corps et le CV joint avant de
-   confirmer l'envoi ; pour le canal formulaire, un navigateur s'ouvre et
-   c'est toi qui cliques sur envoyer.
+4. **Valide.** Chaque candidature attend ta décision. Canal email : tu vois
+   le destinataire, l'objet, le corps et le CV joint avant de confirmer
+   l'envoi. Canal formulaire : après ta validation, un navigateur s'ouvre et
+   remplit le formulaire sous tes yeux — champs reconnus, CV joint, clic sur
+   envoyer — tu peux corriger ou reprendre la main à tout moment (le
+   remplissage est heuristique : selon le site, il peut rester des champs à
+   compléter, la fenêtre te le montre). Le toggle « candidature
+   automatique » repasse en mode 100 % manuel si tu préfères.
 
 **Le mode autonome** (interrupteur « validation humaine » désactivé) envoie
 tout seul les candidatures email dont le score dépasse le seuil choisi.
 Deux garde-fous demeurent : l'interface demande une confirmation globale au
-lancement, et les candidatures par formulaire ne sont **jamais** soumises
-automatiquement — jobot ne clique pas à ta place sur un site de recruteur.
+lancement, et les candidatures par formulaire exigent toujours ta validation
+offre par offre — l'automatisation du formulaire ne se déclenche qu'après
+ton clic, dans un navigateur visible, jamais en arrière-plan.
 
 Le CLI ci-dessous reste disponible pour un usage étape par étape.
 
@@ -111,6 +116,7 @@ Dans l'ordre où tu t'en sers réellement :
 
 ```bash
 uv run jobot fetch --jours 7      # récupère, dédoublonne, filtre
+uv run jobot reparse              # re-route les offres en base (sans appel API)
 uv run jobot stats                # répartition par statut et par canal
 uv run jobot list --statut new    # les offres retenues par le filtre
 uv run jobot list --statut filtered_out   # et pourquoi les autres ont sauté
@@ -168,16 +174,19 @@ points d'un run à l'autre. C'est un outil de tri, pas une note absolue —
 ## La génération du CV
 
 `jobot generate <id>` prend la sélection stockée par le scoring et construit
-un CV filtré :
+un CV adapté. La sélection **met en avant, elle ne supprime pas** : un CV
+amputé de ses compétences pénalise le matching ATS et donne une image
+appauvrie du candidat.
 
-- **Compétences** : uniquement les tags sélectionnés ; une catégorie vidée de
-  tous ses tags disparaît entièrement plutôt que d'afficher un titre vide.
+- **Compétences** : toutes conservées ; dans chaque catégorie, les tags
+  sélectionnés passent en tête.
 - **Expériences** : toujours affichées en entier (ton identité professionnelle
   ne change pas d'une offre à l'autre), seuls les bullets sont filtrés — si
   aucun bullet d'une expérience n'a été sélectionné, ils sont tous affichés
   plutôt que de laisser une expérience vide.
-- **Projets** : retenu si son `id` ou au moins un de ses bullets a été
-  sélectionné ; mêmes règles de repli que les expériences.
+- **Projets** : tous conservés, les sélectionnés en tête ; les bullets d'un
+  projet sont filtrés sur la sélection, avec repli sur tous les bullets si
+  aucun n'a été retenu.
 
 Le rendu passe par un template Jinja2 (`templates/cv.html.jinja`) puis par
 Playwright en mode headless pour produire le PDF.
@@ -200,12 +209,23 @@ généré par le LLM** — une phrase inventée dans une lettre de motivation
 partirait chez un vrai recruteur. Édite ce fichier pour personnaliser le
 message.
 
-**Canal `form`** — `jobot assist <id>` génère le CV, affiche les informations
-à recopier, puis ouvre l'offre dans un navigateur visible à profil
-persistant (tes sessions restent connectées d'une candidature à l'autre).
-**jobot ne soumet jamais un formulaire** : tu remplis, tu vérifies, tu
-cliques. À la fermeture du navigateur, il te demande si la candidature est
-partie pour mettre à jour le statut.
+**Canal `form`** — deux modes, au choix dans l'UI :
+
+- **Automatique** (par défaut) : après ta validation de l'offre, Playwright
+  ouvre un navigateur visible à profil persistant (tes sessions restent
+  connectées d'une candidature à l'autre), remplit les champs qu'il reconnaît
+  (nom, prénom, email, téléphone, message — issu du template email, jamais du
+  LLM), joint le CV PDF et clique sur envoyer. Le remplissage est heuristique :
+  connexion requise, captcha ou formulaire non standard, et il te laisse la
+  main en te disant pourquoi. Rien ne se passe en arrière-plan : tu vois tout,
+  tu peux corriger avant que ça parte.
+- **Manuel** (`jobot assist <id>` en CLI, ou toggle désactivé dans l'UI) :
+  le navigateur s'ouvre sur l'offre avec les informations à recopier, tu
+  remplis et tu cliques toi-même.
+
+Dans les deux cas, à la fermeture du navigateur, jobot te demande si la
+candidature est partie pour mettre à jour le statut — la détection
+automatique du succès n'étant jamais fiable, c'est toi qui confirmes.
 
 ## Choix du LLM
 
@@ -265,12 +285,24 @@ une source qui échoue affiche un avertissement, les autres continuent.
 ## Le canal de candidature
 
 Chaque offre est routée automatiquement à partir des champs renvoyés par
-l'API :
+l'API. Deux pièges de l'API France Travail sont traités ici :
+
+- **L'URL à utiliser n'est pas `origineOffre.urlOrigine`.** Pour une offre
+  venue d'un partenaire (le cas le plus fréquent), ce champ mène à la fiche
+  sur `candidat.francetravail.fr`, dont le bouton « Postuler » ne fait que
+  rediriger vers le site partenaire. `origineOffre.partenaires[].url` donne ce
+  lien final directement — c'est lui que jobot suit, ce qui amène
+  l'automatisation sur le vrai formulaire au lieu d'une page intermédiaire.
+- **`contact.courriel` ne contient pas toujours une adresse.** France Travail
+  y met parfois une phrase (« Pour postuler, utiliser le lien suivant :
+  https://… »). Router ces offres sur le canal email ferait tenter un envoi
+  SMTP vers un destinataire absurde : `clean_email()` ne garde que ce qui est
+  réellement une adresse, le reste bascule sur le canal formulaire.
 
 | Canal | Détecté par | Automatisation |
 |---|---|---|
-| `email` | `contact.courriel` | quasi complète — SMTP + PDF joint, confirmation avant envoi |
-| `form` | `contact.urlPostulation` ou `origineOffre.urlOrigine` | assistée — navigateur pré-rempli, clic humain final |
+| `email` | `contact.courriel`, si c'est bien une adresse | quasi complète — SMTP + PDF joint, confirmation avant envoi |
+| `form` | `contact.urlPostulation`, l'URL du partenaire, ou `origineOffre.urlOrigine` | automatisée après validation par offre — formulaire rempli et soumis dans un navigateur visible (ou mode manuel au choix) |
 | `unknown` | aucun des deux | écartée par défaut |
 
 L'APEC ne publie jamais d'adresse de contact : **toutes ses offres arrivent sur
@@ -300,7 +332,8 @@ Dans l'ordre où les données y circulent :
 | `scoring.py` | Appelle le LLM, valide sa sélection d'`id` contre `selectable_ids()` |
 | `render.py` | Filtre le CV selon la sélection, rend le HTML (Jinja2) puis le PDF (Playwright) |
 | `mailer.py` | Compose et envoie l'email de candidature |
-| `assist.py` | Ouvre le navigateur pour le canal `form` |
+| `assist.py` | Ouvre le navigateur pour le canal `form` (mode manuel) |
+| `autofill.py` | Remplit et soumet les formulaires de candidature (mode automatique, navigateur visible) |
 | `templates/` | `cv.html.jinja` (mise en page du CV), `email.txt.jinja` (texte de l'email — jamais généré par le LLM) |
 | `cli.py` | Toutes les commandes `jobot ...`, assemble les modules ci-dessus |
 

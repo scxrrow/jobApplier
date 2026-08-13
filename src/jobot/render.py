@@ -15,12 +15,16 @@ _env = Environment(
 
 
 def _filter_skills(cv: MasterCV, selected: set[str]) -> list[SkillCategory]:
-    """Ne garde que les tags selectionnes ; enleve les categories vides."""
+    """Toutes les competences restent ; les selectionnees passent en tete.
+
+    Supprimer les tags non selectionnes appauvrissait trop le CV (et penalise
+    le matching ATS) : la selection du LLM ordonne, elle ne retire rien.
+    """
     result = []
     for category in cv.skills:
-        items = [item for item in category.items if item.id in selected]
-        if items:
-            result.append(SkillCategory(category=category.category, items=items))
+        picked = [item for item in category.items if item.id in selected]
+        rest = [item for item in category.items if item.id not in selected]
+        result.append(SkillCategory(category=category.category, items=picked + rest))
     return result
 
 
@@ -36,15 +40,21 @@ def _filter_experiences(cv: MasterCV, selected: set[str]) -> list[Experience]:
 
 
 def _filter_projects(cv: MasterCV, selected: set[str]) -> list[Project]:
-    """Un projet est retenu si son id ou au moins un de ses bullets a ete
-    selectionne. Si le projet est retenu mais aucun bullet individuellement,
-    on garde tous ses bullets."""
-    result = []
+    """Tous les projets restent, mais les projets selectionnes passent en tete.
+
+    Comme pour les competences : la selection met en avant, elle ne supprime
+    pas. Les bullets d'un projet sont filtres sur la selection, avec repli sur
+    tous les bullets si aucun n'a ete retenu (jamais de projet vide).
+    """
+    picked, rest = [], []
     for project in cv.projects:
         bullets = [b for b in project.bullets if b.id in selected]
+        rendered = project.model_copy(update={"bullets": bullets or project.bullets})
         if project.id in selected or bullets:
-            result.append(project.model_copy(update={"bullets": bullets or project.bullets}))
-    return result
+            picked.append(rendered)
+        else:
+            rest.append(rendered)
+    return picked + rest
 
 
 def render_html(cv: MasterCV, selected_ids: list[str]) -> str:

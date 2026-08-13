@@ -1,11 +1,26 @@
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
 import httpx
 
 from ..models import Offer
+
+# France Travail remplit parfois `contact.courriel` avec une phrase plutot
+# qu'une adresse ("Pour postuler, utiliser le lien suivant : https://...").
+# Router ces offres sur le canal email ferait tenter un envoi SMTP vers un
+# destinataire absurde : on ne garde que ce qui ressemble a une vraie adresse.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[a-z]{2,}$", re.I)
+
+
+def clean_email(value: str | None) -> str | None:
+    """Retourne l'adresse si le champ en contient une, sinon None."""
+    if not value:
+        return None
+    candidate = value.strip()
+    return candidate if _EMAIL_RE.match(candidate) else None
 
 TOKEN_URL = (
     "https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=%2Fpartenaire"
@@ -127,8 +142,8 @@ def parse_offer(raw: dict[str, Any]) -> Offer:
     """Convertit une offre brute de l'API en modele interne.
 
     Le routage de candidature sort directement des champs de l'API :
-    `contact.courriel` -> canal email, `contact.urlPostulation` ou
-    `origineOffre.urlOrigine` -> canal formulaire.
+    `contact.courriel` (valide) -> canal email, sinon canal formulaire via
+    `contact.urlPostulation`, l'URL du partenaire, ou `origineOffre.urlOrigine`.
     """
     lieu = raw.get("lieuTravail") or {}
     contact = raw.get("contact") or {}
@@ -143,6 +158,15 @@ def parse_offer(raw: dict[str, Any]) -> Offer:
         prefix = (lieu.get("libelle") or "").split(" - ")[0].strip()
         if prefix:
             departement = prefix
+
+    # Pour une offre issue d'un partenaire (origine "2"), `urlOrigine` ne mene
+    # qu'a la fiche francetravail.fr, dont le bouton "Postuler" redirige vers
+    # le partenaire. `partenaires[].url` donne ce lien final directement :
+    # une etape de moins, et un formulaire atteignable par l'automatisation.
+    partenaire_url = next(
+        (p.get("url") for p in (origine.get("partenaires") or []) if p.get("url")),
+        None,
+    )
 
     nature = (raw.get("natureContrat") or "").lower()
     type_contrat = raw.get("typeContrat")
@@ -168,8 +192,8 @@ def parse_offer(raw: dict[str, Any]) -> Offer:
         salary=salaire.get("libelle"),
         experience=raw.get("experienceLibelle"),
         is_alternance=is_alternance,
-        apply_email=contact.get("courriel"),
-        apply_url=contact.get("urlPostulation"),
+        apply_email=clean_email(contact.get("courriel")),
+        apply_url=contact.get("urlPostulation") or partenaire_url,
         origin_url=origine.get("urlOrigine"),
         published_at=raw.get("dateCreation"),
     )

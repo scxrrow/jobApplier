@@ -49,7 +49,7 @@ jamais faire sauter la decision humaine (ex : scored → applied directement).
 |---|---|---|
 | `config.py` | `.env` → objet `settings` unique | Tout nouveau reglage passe par ici, jamais `os.environ` direct ailleurs |
 | `models.py` | `Offer`, `Channel`, `Status` | `Offer.channel` et `Offer.has_full_description` sont des `@property` calculees, pas des colonnes |
-| `sources/francetravail.py` | Client API officielle (OAuth2) | Pagination `range=0-149`, plafond ~1150/requete |
+| `sources/francetravail.py` | Client API officielle (OAuth2) | Pagination `range=0-149`, plafond ~1150/requete. Deux pieges de routage traites dans `parse_offer` — voir *Pieges deja rencontres* |
 | `sources/apec.py` | Scraping des endpoints internes apec.fr | **Pas d'API publique** — anti-bot DataDome, voir docstring du fichier avant d'y toucher |
 | `filters.py` | Filtrage a regles, avant tout appel LLM | Le matching mots-cles est **desactive** pour les offres a description tronquee (`has_full_description=False`) — voir plus bas |
 | `db.py` | SQLite : upsert, dedup, transitions de statut | Migrations additives dans `_migrate()` (ALTER TABLE) — jamais de migration destructive |
@@ -59,9 +59,10 @@ jamais faire sauter la decision humaine (ex : scored → applied directement).
 | `cv.py` | Modeles Pydantic du CV maitre + `selectable_ids()` | **Le garde-fou central du projet**, voir invariants ci-dessous |
 | `llm/` | Abstraction fournisseur (`base.py` = contrat) | `gemini.py` et `openai_compat.py` (LM Studio/Ollama/OpenAI/OpenRouter) l'implementent ; jamais d'appel direct a un SDK LLM hors de ce package |
 | `scoring.py` | Note une offre + valide la selection d'id | Rejette tout id hors de `selectable_ids()` avant stockage |
-| `render.py` | CV filtre → HTML (Jinja2) → PDF (Playwright) | `page.emulate_media("print")` obligatoire avant `page.pdf()` |
+| `render.py` | CV adapte → HTML (Jinja2) → PDF (Playwright) | `page.emulate_media("print")` obligatoire avant `page.pdf()`. La selection LLM **ordonne** (competences/projets en tete), elle ne **supprime plus** — un CV ampute a ete un bug signale, ne pas reintroduire le filtrage dur |
 | `mailer.py` | Compose et envoie l'email | Corps depuis `templates/email.txt.jinja`, jamais du LLM |
-| `assist.py` | Navigateur assiste pour le canal `form` | Ne soumet jamais un formulaire programmatiquement |
+| `assist.py` | Navigateur assiste (mode manuel du canal `form`) | L'humain fait tout |
+| `autofill.py` | Remplissage + soumission auto des formulaires (mode auto du canal `form`) | Heuristiques best-effort ; navigateur toujours visible ; jamais sans validation par offre — voir invariant 4 |
 | `cli.py` | Toutes les commandes `jobot ...` | Fichier le plus gros, point d'assemblage de tout le reste |
 
 ## Invariants — a ne jamais casser sans en discuter explicitement
@@ -84,10 +85,14 @@ reformuler la tache, pas contourner la regle.
    "confirmer l'envoi". Le mode autonome de l'UI est la seule exception,
    voulue par l'utilisateur : validation humaine desactivee au lancement
    + confirmation globale — active par defaut, jamais par defaut inverse.
-4. **Un formulaire de candidature n'est jamais soumis automatiquement**,
-   meme en mode autonome. Le navigateur s'ouvre visible (`assist.py`),
-   l'humain remplit et clique. C'est une decision produit, pas une
-   limitation technique a "corriger".
+4. **Un formulaire n'est rempli/soumis qu'apres validation explicite de
+   l'offre par l'utilisateur** (clic par offre dans l'UI), et le navigateur
+   reste **toujours visible** pendant l'automatisation (`autofill.py`) — pas
+   de soumission headless, pas de soumission en masse sans clic par offre.
+   Le mode manuel (`assist.py`, l'humain fait tout) reste disponible via le
+   toggle "candidature automatique" de l'UI. Le statut final (`applied`)
+   reste confirme par l'humain : la detection du succes d'une soumission
+   n'est pas fiable.
 5. **Aucun fournisseur LLM en dur dans la logique metier.** `scoring.py` et
    `cv.py::extract_master_cv` prennent un `LLMClient` (protocol de `llm/base.py`),
    jamais un client Gemini/OpenAI importe directement. Nouveau fournisseur =
@@ -113,6 +118,22 @@ reformuler la tache, pas contourner la regle.
 - **PDF Playwright sans style d'impression** : `page.pdf()` n'applique pas
   les regles `@media print` par defaut — il faut `page.emulate_media("print")`
   avant, sinon le CSS d'impression du template est ignore silencieusement.
+- **URL de candidature France Travail** : `origineOffre.urlOrigine` mene a la
+  fiche sur `candidat.francetravail.fr`, PAS au formulaire — son bouton
+  "Postuler" redirige vers le partenaire, ce qui rendait l'automatisation
+  impossible. `origineOffre.partenaires[].url` contient le lien direct (present
+  sur 100 % des offres partenaires observees). `parse_offer` le prefere donc a
+  `urlOrigine` ; ne pas revenir en arriere en "simplifiant" le parsing.
+- **`contact.courriel` peut ne pas etre une adresse** : France Travail y met
+  parfois une phrase ("Pour postuler, utiliser le lien suivant : https://...").
+  Sans validation, ces offres partaient sur le canal email et un `send
+  --envoyer` aurait tente un envoi SMTP vers cette chaine. `clean_email()`
+  filtre sur une vraie regex d'adresse ; volontairement strict (une adresse
+  noyee dans une phrase est rejetee plutot qu'extraite au jugé).
+- **Corrections de parsing retroactives** : le JSON brut de chaque offre est
+  conserve en colonne `raw`. `pipeline.reparse_routing()` (expose par `jobot
+  reparse`, et appele au debut de chaque run UI) re-route les offres deja en
+  base sans rappeler l'API. Y penser apres toute amelioration de `parse_offer`.
 - **Departement absent dans l'API France Travail** : certaines offres ne
   renvoient qu'un `libelle` ("35 - Ille-et-Vilaine") sans `codePostal`. Le
   parsing doit avoir un repli sur le prefixe du libelle, sinon ces offres

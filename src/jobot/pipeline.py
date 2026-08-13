@@ -150,29 +150,40 @@ class SearchParams(BaseModel):
 
     departements: list[str] = Field(default_factory=list)
     contrat: str = "alternance"
+    # Intitules de poste saisis librement dans l'UI ("technicien support"...).
+    postes: list[str] = Field(default_factory=list)
+    # Ancien champ des presets DOMAINES, conserve pour relire les ui-params
+    # sauvegardes avant la saisie libre.
     domaines: list[str] = Field(default_factory=list)
     mots_cles: list[str] = Field(default_factory=list)
     jours: int = 7
     sources: list[str] = Field(default_factory=lambda: list(SOURCE_NAMES))
     validation_humaine: bool = True
+    # Canal form : remplissage + soumission du formulaire par Playwright apres
+    # la validation de l'offre par l'utilisateur (sinon simple ouverture).
+    form_auto: bool = True
     score_min: int = 60
     limite_score: int = 100
     max_par_requete: int = 600
 
     def keywords(self) -> list[str]:
-        """Union ordonnee des mots-cles des domaines choisis et des mots-cles libres."""
+        """Union ordonnee : postes saisis, presets herites, mots-cles libres."""
         seen: set[str] = set()
         result: list[str] = []
-        for domaine in self.domaines:
-            for kw in DOMAINES.get(domaine, {}).get("mots_cles", []):
-                if normalize(kw) not in seen:
-                    seen.add(normalize(kw))
-                    result.append(kw)
-        for kw in self.mots_cles:
+
+        def add(kw: str) -> None:
             kw = kw.strip()
             if kw and normalize(kw) not in seen:
                 seen.add(normalize(kw))
                 result.append(kw)
+
+        for poste in self.postes:
+            add(poste)
+        for domaine in self.domaines:
+            for kw in DOMAINES.get(domaine, {}).get("mots_cles", []):
+                add(kw)
+        for kw in self.mots_cles:
+            add(kw)
         return result
 
     def exclusions(self) -> list[str]:
@@ -387,6 +398,31 @@ def fetch_offers(
     return offers, raws
 
 
+def reparse_routing(conn) -> int:
+    """Recalcule le canal de candidature des offres deja en base.
+
+    Le JSON brut de chaque offre est conserve : quand le parsing s'ameliore
+    (URL directe du partenaire, rejet des faux emails), les offres deja
+    stockees en profitent sans nouvel appel API. Retourne le nombre d'offres
+    dont le routage a change.
+    """
+    parsers = {"francetravail": parse_ft_offer, "apec": parse_apec_offer}
+    rows = conn.execute("SELECT id, source, raw FROM offers WHERE raw IS NOT NULL").fetchall()
+
+    changed = 0
+    for row in rows:
+        parse = parsers.get(row["source"])
+        if parse is None:
+            continue
+        try:
+            offer = parse(json.loads(row["raw"]))
+        except Exception:  # noqa: BLE001 - un raw illisible n'arrete pas les autres
+            continue
+        changed += db.update_routing(conn, offer)
+    conn.commit()
+    return changed
+
+
 def apply_filters(conn, rules: FilterRules, log: Log) -> tuple[int, int]:
     """Filtre a regles sur toutes les offres 'new'. Retourne (gardees, ecartees)."""
     rows = conn.execute(
@@ -592,6 +628,9 @@ def run_pipeline(params: SearchParams, state: RunState) -> None:
             state.end("fetch")
 
             state.begin("filtre")
+            rerouted = reparse_routing(conn)
+            if rerouted:
+                state.log("info", f"{rerouted} offre(s) re-routée(s) vers le bon canal")
             # Les criteres viennent de changer avec cette recherche : tout ce
             # que les filtres avaient ecarte repasse a l'examen.
             reset = db.reset_filtered(conn)

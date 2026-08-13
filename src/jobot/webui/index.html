@@ -298,8 +298,9 @@
       </div>
 
       <div class="field">
-        <label class="label">Type de poste</label>
-        <div class="chips" id="domain-chips"></div>
+        <label class="label">Postes recherchés — Entrée ou virgule pour ajouter</label>
+        <input type="text" id="poste-input" placeholder="ex : technicien support, administrateur systèmes, chargé de recrutement…">
+        <div class="chips" id="poste-chips" style="margin-top:12px"></div>
       </div>
 
       <div class="field">
@@ -329,7 +330,7 @@
       </div>
 
       <div class="field">
-        <div class="toggle-row">
+        <div class="toggle-row" style="margin-bottom:16px">
           <button class="toggle on" id="validation-toggle" aria-label="Validation humaine"></button>
           <div class="toggle-text">
             <b>Validation humaine avant envoi</b>
@@ -338,11 +339,23 @@
               chaque candidature attend ta confirmation ici.
               Désactivée : les candidatures par email partent toutes seules dès que
               le score dépasse le seuil — les formulaires web, eux, demanderont
-              toujours ton clic final.
+              toujours ta validation par offre.
             </small>
             <span class="autonomy-warning" id="autonomy-warning">
               Mode autonome : les emails de candidature partiront réellement, sans confirmation.
             </span>
+          </div>
+        </div>
+        <div class="toggle-row">
+          <button class="toggle on" id="form-auto-toggle" aria-label="Formulaires automatiques"></button>
+          <div class="toggle-text">
+            <b>Formulaires : candidature automatique</b>
+            <small>
+              Activée : après ta validation d'une offre « formulaire », le navigateur
+              s'ouvre, remplit les champs, joint le CV et clique sur envoyer — sous
+              tes yeux, tu peux corriger ou reprendre la main à tout moment.
+              Désactivée : le navigateur s'ouvre et tu remplis toi-même.
+            </small>
           </div>
         </div>
       </div>
@@ -381,9 +394,9 @@
   <div class="container">
     <h2 class="section-title">Candidatures à valider</h2>
     <p class="subtitle">
-      Dernière étape humaine : vérifie le CV adapté, puis envoie ou écarte.
-      Les offres « formulaire » s'ouvrent dans un navigateur — jobot pré-remplit,
-      toi seul cliques sur envoyer.
+      Dernière étape humaine : vérifie le CV adapté, puis valide ou écarte.
+      Après ta validation, les offres « formulaire » sont remplies et envoyées
+      dans un navigateur visible — tu peux corriger ou reprendre la main à tout moment.
     </p>
     <div class="offer-list" id="offer-list"></div>
     <div class="empty hidden" id="offer-empty">Aucune candidature en attente. Lance une recherche ci-dessus.</div>
@@ -417,18 +430,15 @@
   </div>
 </div>
 
-<!-- ============ Modale : assistant formulaire ============ -->
+<!-- ============ Modale : candidature formulaire ============ -->
 <div class="overlay" id="assist-overlay">
   <div class="modal">
-    <h2>Assistant de candidature</h2>
-    <p class="sub" id="assist-sub">
-      Un navigateur vient de s'ouvrir sur l'offre. Remplis le formulaire avec les
-      informations ci-dessous, joins le CV, et clique toi-même sur envoyer.
-      Ferme ensuite la fenêtre du navigateur.
-    </p>
+    <h2 id="assist-title">Candidature automatique</h2>
+    <p class="sub" id="assist-sub"></p>
+    <div class="kv hidden" id="assist-report"></div>
     <div class="kv" id="assist-kv"></div>
     <div class="row" style="margin-top:32px" id="assist-wait-row">
-      <span class="subtitle" style="font-size:13px; margin-right:auto">En attente de la fermeture du navigateur…</span>
+      <span class="subtitle" style="font-size:13px; margin-right:auto" id="assist-wait-text">En attente de la fermeture du navigateur…</span>
       <a class="btn tertiary" id="assist-pdf" target="_blank">Voir le CV</a>
     </div>
     <div class="row hidden" style="margin-top:32px" id="assist-done-row">
@@ -461,13 +471,15 @@ const api = async (path, opts = {}) => {
 const state = {
   meta: null,
   deps: new Set(),
-  domaines: new Set(),
+  postes: [],
   contrat: "alternance",
   sources: new Set(),
   validation: true,
+  formAuto: true,
   running: false,
   lastLogCount: -1,
   assistOffer: null,
+  assistMode: "auto",
   applyOffer: null,
 };
 
@@ -558,45 +570,96 @@ function setValidation(on) {
   $("autonomy-warning").classList.toggle("visible", !on);
 }
 
+function setFormAuto(on) {
+  state.formAuto = on;
+  $("form-auto-toggle").classList.toggle("on", on);
+}
+
+function renderPosteChips() {
+  const box = $("poste-chips");
+  box.innerHTML = "";
+  for (const poste of state.postes) {
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "chip selected";
+    el.innerHTML = `${esc(poste)}<span class="x">✕</span>`;
+    el.onclick = () => {
+      state.postes = state.postes.filter((p) => p !== poste);
+      renderPosteChips();
+    };
+    box.appendChild(el);
+  }
+}
+
+function addPostes(raw) {
+  for (const part of raw.split(",")) {
+    const poste = part.trim();
+    if (poste && !state.postes.some((p) => p.toLowerCase() === poste.toLowerCase())) {
+      state.postes.push(poste);
+    }
+  }
+  renderPosteChips();
+}
+
+function setupPosteInput() {
+  const input = $("poste-input");
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      addPostes(input.value);
+      input.value = "";
+    }
+  });
+  input.addEventListener("blur", () => {
+    if (input.value.trim()) { addPostes(input.value); input.value = ""; }
+  });
+}
+
 function initForm() {
   const m = state.meta;
   const d = m.defaults;
 
   state.deps = new Set(d.departements || []);
-  state.domaines = new Set((d.domaines || []).filter((x) => m.domaines.some((dm) => dm.id === x)));
+  state.postes = [...(d.postes || [])];
   state.contrat = d.contrat || "alternance";
   state.sources = new Set(d.sources && d.sources.length ? d.sources : m.sources);
   $("kw-input").value = (d.mots_cles || []).join(", ");
   $("jours").value = String(d.jours || 7);
   $("score-min").value = String(d.score_min ?? 60);
   setValidation(d.validation_humaine !== false);
+  setFormAuto(d.form_auto !== false);
 
   const contratSel = new Set([state.contrat]);
   chipRow("contract-chips", m.contrats, contratSel, {
     single: true,
     onchange: () => { state.contrat = [...contratSel][0]; },
   });
-  chipRow("domain-chips", m.domaines, state.domaines);
   chipRow("source-chips",
     m.sources.map((s) => ({ id: s, label: s === "francetravail" ? "France Travail" : "APEC" })),
     state.sources);
   renderDepChips();
   setupDepPicker();
+  renderPosteChips();
+  setupPosteInput();
 
   $("validation-toggle").onclick = () => setValidation(!state.validation);
+  $("form-auto-toggle").onclick = () => setFormAuto(!state.formAuto);
   $("launch-btn").onclick = launch;
   $("cancel-btn").onclick = () => api("/api/cancel", { method: "POST" }).catch((e) => toast(e.message, "error"));
 }
 
 function buildParams() {
+  // Un intitule reste dans le champ sans Entrée ? On le prend quand meme.
+  if ($("poste-input").value.trim()) { addPostes($("poste-input").value); $("poste-input").value = ""; }
   return {
     departements: [...state.deps],
     contrat: state.contrat,
-    domaines: [...state.domaines],
+    postes: [...state.postes],
     mots_cles: $("kw-input").value.split(",").map((s) => s.trim()).filter(Boolean),
     jours: parseInt($("jours").value, 10),
     sources: [...state.sources],
     validation_humaine: state.validation,
+    form_auto: state.formAuto,
     score_min: Math.max(0, Math.min(100, parseInt($("score-min").value, 10) || 60)),
   };
 }
@@ -604,8 +667,8 @@ function buildParams() {
 async function launch() {
   const params = buildParams();
   if (!params.departements.length) return toast("Choisis au moins un département.", "error");
-  if (!params.domaines.length && !params.mots_cles.length)
-    return toast("Choisis au moins un type de poste ou un mot-clé.", "error");
+  if (!params.postes.length && !params.mots_cles.length)
+    return toast("Indique au moins un intitulé de poste ou un mot-clé.", "error");
   if (!params.sources.length) return toast("Choisis au moins une source.", "error");
   if (!params.validation_humaine) {
     const ok = confirm(
@@ -710,9 +773,10 @@ function offerCard(o) {
   const queuedNote = o.status === "queued" && o.channel === "form"
     ? '<span class="badge form">action requise</span>' : "";
 
+  const formLabel = state.formAuto ? "Valider &amp; postuler" : "Ouvrir le formulaire";
   const primary = o.channel === "email"
     ? `<button class="btn" data-act="apply" data-id="${esc(o.id)}">Valider &amp; envoyer</button>`
-    : `<button class="btn" data-act="assist" data-id="${esc(o.id)}">Ouvrir l'assistant</button>`;
+    : `<button class="btn" data-act="assist" data-id="${esc(o.id)}">${formLabel}</button>`;
 
   return `<div class="card offer" data-id="${esc(o.id)}">
     <div class="score">
@@ -829,32 +893,66 @@ async function confirmApply() {
 
 /* ---- Assistant formulaire ---- */
 
+const FIELD_LABELS = { prenom: "Prénom", nom: "Nom", email: "Email", telephone: "Téléphone", message: "Message" };
+
 async function startAssist(id) {
   try {
-    const res = await api("/api/offers/" + encodeURIComponent(id) + "/assist", { method: "POST" });
+    const res = await api("/api/offers/" + encodeURIComponent(id) + "/assist", {
+      method: "POST",
+      body: JSON.stringify({ auto: state.formAuto }),
+    });
     state.assistOffer = id;
+    state.assistMode = res.mode;
+    $("assist-title").textContent = res.mode === "auto" ? "Candidature automatique" : "Candidature manuelle";
+    $("assist-report").classList.add("hidden");
+    $("assist-report").innerHTML = "";
     $("assist-kv").innerHTML = res.fields.map((f) => `
       <div class="kv-row"><span class="k">${esc(f.label)}</span><span class="v">${esc(f.value)}</span></div>`).join("");
     $("assist-pdf").href = "/api/offers/" + encodeURIComponent(id) + "/cv.pdf";
     $("assist-wait-row").classList.remove("hidden");
     $("assist-done-row").classList.add("hidden");
-    $("assist-sub").textContent =
-      "Un navigateur vient de s'ouvrir sur l'offre. Remplis le formulaire avec les " +
-      "informations ci-dessous, joins le CV, et clique toi-même sur envoyer. " +
-      "Ferme ensuite la fenêtre du navigateur.";
+    $("assist-wait-text").textContent = res.mode === "auto"
+      ? "Remplissage du formulaire en cours…"
+      : "En attente de la fermeture du navigateur…";
+    $("assist-sub").textContent = res.mode === "auto"
+      ? "Un navigateur s'ouvre et remplit le formulaire sous tes yeux : champs, CV joint, " +
+        "puis envoi. Vérifie le résultat dans la fenêtre, corrige si besoin, et ferme-la."
+      : "Un navigateur vient de s'ouvrir sur l'offre. Remplis le formulaire avec les " +
+        "informations ci-dessous, joins le CV, et clique toi-même sur envoyer. " +
+        "Ferme ensuite la fenêtre du navigateur.";
     $("assist-overlay").classList.add("open");
     poll(true);
   } catch (e) { toast(e.message, "error"); }
 }
 
+function renderAssistReport(report) {
+  const box = $("assist-report");
+  const rows = [];
+  if (report.filled.length) {
+    const labels = [...new Set(report.filled)].map((f) => FIELD_LABELS[f] || f).join(", ");
+    rows.push(`<div class="kv-row"><span class="k">Champs remplis</span><span class="v">${esc(labels)}</span></div>`);
+  }
+  rows.push(`<div class="kv-row"><span class="k">CV joint</span><span class="v">${report.uploaded ? "oui" : "non"}</span></div>`);
+  rows.push(`<div class="kv-row"><span class="k">Envoi</span><span class="v" style="color:${report.submitted ? "var(--success)" : "var(--warning)"}">${report.submitted ? "bouton d'envoi cliqué — vérifie dans le navigateur" : "non soumis"}</span></div>`);
+  for (const note of report.notes) {
+    rows.push(`<div class="kv-row"><span class="k">Note</span><span class="v" style="color:var(--warning)">${esc(note)}</span></div>`);
+  }
+  box.innerHTML = rows.join("");
+  box.classList.remove("hidden");
+  $("assist-wait-text").textContent = "Vérifie dans le navigateur, puis ferme la fenêtre.";
+}
+
 function handleAssistState(assist) {
   if (!state.assistOffer) return;
+  if (assist.report && state.assistMode === "auto" && !$("assist-report").innerHTML) {
+    renderAssistReport(assist.report);
+  }
   if (assist.status === "closed") {
     $("assist-wait-row").classList.add("hidden");
     $("assist-done-row").classList.remove("hidden");
     $("assist-sub").textContent = "Navigateur fermé.";
   } else if (assist.status === "error") {
-    toast("Assistant : " + (assist.error || "erreur"), "error");
+    toast("Candidature formulaire : " + (assist.error || "erreur"), "error");
     $("assist-overlay").classList.remove("open");
     state.assistOffer = null;
     api("/api/assist/done", { method: "POST", body: JSON.stringify({ applied: false }) }).catch(() => {});

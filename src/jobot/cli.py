@@ -120,6 +120,25 @@ def fetch(
 
 
 @app.command()
+def reparse() -> None:
+    """Recalcule le canal de candidature des offres en base, sans appel API.
+
+    A lancer apres une amelioration du parsing : le JSON brut etant conserve,
+    les offres deja stockees profitent des corrections (URL directe du site
+    partenaire, rejet des adresses email invalides).
+    """
+    conn = db.connect(settings.db_path)
+    changed = pipeline.reparse_routing(conn)
+    if changed:
+        console.print(f"[green]{changed} offre(s) re-routee(s).[/green]")
+        for channel, n in sorted(db.counts_by_channel(conn).items(), key=lambda kv: -kv[1]):
+            console.print(f"  {channel:<9} {n:>5}")
+    else:
+        console.print("[dim]Aucun changement : le routage est deja a jour.[/dim]")
+    conn.close()
+
+
+@app.command()
 def score(
     limite: int = typer.Option(50, help="Nombre max d'offres a scorer par appel."),
 ) -> None:
@@ -577,7 +596,7 @@ def stats() -> None:
     console.print("\n[bold]Par canal[/bold] [dim](hors ecartees)[/dim]")
     labels = {
         "email": "100% automatisable (SMTP)",
-        "form": "assiste (Playwright + clic humain)",
+        "form": "automatise apres validation (navigateur visible)",
         "unknown": "manuel",
     }
     for channel, n in sorted(by_channel.items(), key=lambda kv: -kv[1]):

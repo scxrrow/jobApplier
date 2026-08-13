@@ -138,6 +138,32 @@ def upsert_offers(
     return new, updated, unchanged
 
 
+def update_routing(conn: sqlite3.Connection, offer: Offer) -> bool:
+    """Reecrit les champs de candidature d'une offre stockee, si besoin.
+
+    Sert aux corrections de parsing appliquees a posteriori (nouvelle source
+    d'URL, adresse email invalide) : le JSON brut est conserve en base, on
+    peut donc re-router sans rappeler l'API. Ne touche ni au statut, ni au
+    score, ni a la selection de CV. Retourne True si quelque chose a change.
+    """
+    row = conn.execute(
+        "SELECT apply_email, apply_url, origin_url, channel FROM offers WHERE id = ?",
+        (offer.id,),
+    ).fetchone()
+    if row is None:
+        return False
+
+    fields = (offer.apply_email, offer.apply_url, offer.origin_url, str(offer.channel))
+    if tuple(row) == fields:
+        return False
+
+    conn.execute(
+        "UPDATE offers SET apply_email=?, apply_url=?, origin_url=?, channel=? WHERE id=?",
+        (*fields, offer.id),
+    )
+    return True
+
+
 def mark_filtered(conn: sqlite3.Connection, offer_id: str, reason: str) -> None:
     conn.execute(
         "UPDATE offers SET status=?, filter_reason=? WHERE id=?",

@@ -31,11 +31,12 @@ seulement "est-ce un poste du bon secteur ?" mais "ce candidat en particulier \
 serait-il un bon candidat pour ce poste precis ?". Une offre d'un autre metier qui \
 ne mentionne le coeur de profil du candidat qu'en passant doit recevoir un score bas.
 2. Justifie en 1-2 phrases, en francais.
-3. Choisis, parmi les id du CV maitre ci-dessous, ceux a mettre en avant pour un CV \
-adapte a cette offre precise : les tags de competences les plus pertinents, les \
-bullets d'experience les plus pertinents pour chaque experience, et les projets \
-(avec leurs bullets) les plus pertinents. N'invente jamais un id : n'utilise que \
-ceux presents dans le CV maitre ci-dessous."""
+3. Choisis, parmi les id du CV maitre ci-dessous, ceux a METTRE EN AVANT pour un CV \
+adapte a cette offre precise : tags de competences, bullets d'experience, projets et \
+leurs bullets. Ta selection sert a ordonner le CV (les elements choisis passent en \
+tete), pas a supprimer le reste : sois genereux et selectionne tout ce qui est \
+pertinent, meme indirectement. N'invente jamais un id : n'utilise que ceux presents \
+dans le CV maitre ci-dessous."""
 
 
 @dataclass

@@ -1,15 +1,16 @@
 {
   "departements": [
-    "37"
+    "37",
+    "35",
+    "75"
   ],
   "contrat": "alternance",
-  "domaines": [
-    "support",
-    "sysres",
-    "cyber",
-    "dev",
-    "devops"
+  "postes": [
+    "technicien support",
+    "administrateur réseau",
+    "cybersécurité"
   ],
+  "domaines": [],
   "mots_cles": [],
   "jours": 31,
   "sources": [
@@ -17,6 +18,7 @@
     "apec"
   ],
   "validation_humaine": true,
+  "form_auto": true,
   "score_min": 50,
   "limite_score": 100,
   "max_par_requete": 600
