@@ -145,6 +145,21 @@ def mark_filtered(conn: sqlite3.Connection, offer_id: str, reason: str) -> None:
     )
 
 
+def reset_filtered(conn: sqlite3.Connection) -> int:
+    """Repasse les offres ecartees par les filtres en 'new'.
+
+    Les criteres changent d'une recherche a l'autre (UI) : une offre rejetee
+    hier peut passer aujourd'hui. Sans effet sur les statuts decides par
+    l'humain ou le scoring (scored/queued/skipped/applied).
+    """
+    cur = conn.execute(
+        "UPDATE offers SET status=?, filter_reason=NULL WHERE status=?",
+        (str(Status.NEW), str(Status.FILTERED_OUT)),
+    )
+    conn.commit()
+    return cur.rowcount
+
+
 def save_score(
     conn: sqlite3.Connection,
     offer_id: str,

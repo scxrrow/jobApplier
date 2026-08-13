@@ -5,9 +5,41 @@ par rapport à ton profil, génère un CV adapté à chacune, et t'aide à
 candidater — par email automatiquement, ou en te préparant le formulaire
 quand un humain doit cliquer.
 
-Rien ne part jamais sans validation explicite. Le pipeline propose, tu
-disposes à deux endroits précis : tu choisis quelles offres garder, et tu
-confirmes chaque envoi.
+Par défaut, rien ne part sans validation explicite : le pipeline propose,
+tu confirmes chaque envoi. La validation peut être désactivée au lancement
+d'une recherche pour un mode entièrement autonome — c'est un choix explicite,
+confirmé dans l'interface.
+
+## L'interface web
+
+```bash
+uv run jobot ui        # ouvre http://127.0.0.1:8321 dans ton navigateur
+```
+
+C'est la façon la plus simple d'utiliser jobot, pensée pour fonctionner sans
+toucher au terminal une fois lancée :
+
+1. **Pas encore de CV maître ?** L'interface te propose d'importer ton CV
+   existant (fichier HTML/texte ou copier-coller) — l'extraction est faite
+   par le LLM configuré. Relis toujours `data/master-cv.json` ensuite.
+2. **Choisis tes critères** : département(s), type de contrat (alternance,
+   CDI, CDD, stage, intérim), type de poste (support technique, systèmes &
+   réseaux, RH, compta…) et mots-clés libres. Tes derniers critères sont
+   mémorisés (`data/ui-params.json`).
+3. **Lance.** Tout s'enchaîne automatiquement : récupération, filtrage,
+   scoring LLM, génération des CV adaptés — jusqu'à l'écran de validation.
+4. **Valide.** Chaque candidature attend ta décision : pour le canal email,
+   tu vois le destinataire, l'objet, le corps et le CV joint avant de
+   confirmer l'envoi ; pour le canal formulaire, un navigateur s'ouvre et
+   c'est toi qui cliques sur envoyer.
+
+**Le mode autonome** (interrupteur « validation humaine » désactivé) envoie
+tout seul les candidatures email dont le score dépasse le seuil choisi.
+Deux garde-fous demeurent : l'interface demande une confirmation globale au
+lancement, et les candidatures par formulaire ne sont **jamais** soumises
+automatiquement — jobot ne clique pas à ta place sur un site de recruteur.
+
+Le CLI ci-dessous reste disponible pour un usage étape par étape.
 
 ## Le principe
 
@@ -256,6 +288,9 @@ Dans l'ordre où les données y circulent :
 |---|---|
 | `config.py` | Config centralisée (`.env` → objet `settings`), messages d'erreur pour les identifiants manquants |
 | `models.py` | `Offer`, `Channel`, `Status` — le schéma d'une offre et son cycle de vie |
+| `pipeline.py` | Orchestration du pipeline complet (fetch → filtre → score → génération → envoi), presets domaines/départements, état d'exécution partagé avec l'UI |
+| `web.py` | API FastAPI locale de `jobot ui` (recherche, validation, assistant, import CV) |
+| `webui/` | L'interface web (page unique, design Electric Volt) |
 | `sources/francetravail.py` | Client OAuth2 + pagination pour l'API France Travail |
 | `sources/apec.py` | Client de la recherche apec.fr (pas d'API publique — voir *Les sources d'offres*) |
 | `filters.py` | Filtrage à règles, sans appel LLM |
@@ -291,6 +326,3 @@ Dans l'ordre où les données y circulent :
   d'offres*), ce qui rend leur scoring moins fin que celui des offres France
   Travail.
 - Pas de relance automatique après candidature.
-- La revue (`jobot review`) est en ligne de commande — une petite UI web
-  locale serait plus confortable pour relire les PDF sans quitter le
-  navigateur.

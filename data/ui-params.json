@@ -1,0 +1,23 @@
+{
+  "departements": [
+    "37"
+  ],
+  "contrat": "alternance",
+  "domaines": [
+    "support",
+    "sysres",
+    "cyber",
+    "dev",
+    "devops"
+  ],
+  "mots_cles": [],
+  "jours": 31,
+  "sources": [
+    "francetravail",
+    "apec"
+  ],
+  "validation_humaine": true,
+  "score_min": 50,
+  "limite_score": 100,
+  "max_par_requete": 600
+}

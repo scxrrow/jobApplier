@@ -54,6 +54,16 @@ CONTRACT_LABELS = {
 
 ALTERNANCE_CONTRACTS = [20053, 597137, 597138, 597139, 597140]
 
+# Identifiants a envoyer dans `typesContrat` pour chaque type de contrat
+# selectionnable dans l'UI (cf filters.CONTRACT_KINDS).
+CONTRACT_FILTER_IDS = {
+    "alternance": ALTERNANCE_CONTRACTS,
+    "cdi": [101888],
+    "cdd": [101887],
+    "stage": [597171],
+    "interim": [101930, 597141, 101889],
+}
+
 # "Tours - 37", "Indre-et-Loire - 37", "Saint-Denis - 974"
 _DEPARTMENT_RE = re.compile(r"-\s*(\d{3}|2[AB]|\d{2})\s*$")
 
@@ -105,11 +115,23 @@ class ApecClient:
         mots_cles: str | None = None,
         departement: str | None = None,
         alternance: bool = False,
+        type_contrat: str | None = None,
         publiee_depuis: int | None = None,
         max_results: int = 600,
     ) -> list[dict[str, Any]]:
-        """Recherche paginee. `publiee_depuis` en jours."""
+        """Recherche paginee. `publiee_depuis` en jours.
+
+        `type_contrat` : un type de `filters.CONTRACT_KINDS` ('cdi', 'stage'...),
+        prioritaire sur le drapeau `alternance` conserve pour compatibilite.
+        """
         self._prime()
+
+        if type_contrat:
+            contract_ids = CONTRACT_FILTER_IDS.get(type_contrat.strip().lower(), [])
+        elif alternance:
+            contract_ids = list(ALTERNANCE_CONTRACTS)
+        else:
+            contract_ids = []
 
         criteria: dict[str, Any] = {
             "activeFiltre": True,
@@ -117,7 +139,7 @@ class ApecClient:
             "sorts": [{"direction": "DESCENDING", "type": "DATE"}],
             "motsCles": mots_cles or "",
             "lieux": _location_ids(departement),
-            "typesContrat": list(ALTERNANCE_CONTRACTS) if alternance else [],
+            "typesContrat": contract_ids,
             "fonctions": [],
             "niveauxExperience": [],
             "secteursActivite": [],

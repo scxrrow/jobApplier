@@ -21,21 +21,21 @@ class _ScoreOutput(BaseModel):
 TASK_PROMPT = """Tu evalues la pertinence d'offres d'emploi/alternance pour un candidat, \
 a partir de son CV maitre structure en JSON (fourni ci-dessous).
 
-Le candidat est etudiant en cybersecurite (EPITA), actuellement en alternance \
-Developpeur/DevOps. Son profil est oriente securite des systemes, infrastructure, \
-automatisation de tests, administration Linux/Windows.
+Le profil du candidat est entierement decrit par ce CV maitre : appuie-toi sur \
+son titre (headline), son resume, ses formations, ses experiences et ses \
+competences — n'invente rien au-dela de ce qu'il contient.
 
 Pour l'offre donnee dans le message :
 1. Attribue un score de pertinence (0-100) par rapport a CE profil specifique — pas \
-seulement "est-ce un poste tech ?" mais "ce candidat en particulier serait-il un bon \
-candidat pour ce poste precis ?". Une offre generique de developpement web ou un poste \
-RH/recrutement mentionnant "devops" en passant doit recevoir un score bas.
+seulement "est-ce un poste du bon secteur ?" mais "ce candidat en particulier \
+serait-il un bon candidat pour ce poste precis ?". Une offre d'un autre metier qui \
+ne mentionne le coeur de profil du candidat qu'en passant doit recevoir un score bas.
 2. Justifie en 1-2 phrases, en francais.
 3. Choisis, parmi les id du CV maitre ci-dessous, ceux a mettre en avant pour un CV \
 adapte a cette offre precise : les tags de competences les plus pertinents, les \
 bullets d'experience les plus pertinents pour chaque experience, et les projets \
-(avec leurs bullets) les plus pertinents parmi les trois proposes. N'invente jamais \
-un id : n'utilise que ceux presents dans le CV maitre ci-dessous."""
+(avec leurs bullets) les plus pertinents. N'invente jamais un id : n'utilise que \
+ceux presents dans le CV maitre ci-dessous."""
 
 
 @dataclass

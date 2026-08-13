@@ -1,0 +1,948 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JOBOT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --red: #CC0000;
+    --red-hover: #E60000;
+    --steel: #393C41;
+    --mid: #5C5E62;
+    --bg: #000000;
+    --surface: #111111;
+    --lvl2: #1A1A1A;
+    --lvl3: #222222;
+    --white: #FFFFFF;
+    --text2: #A0A0A0;
+    --border: #2C2C2E;
+    --success: #17B169;
+    --warning: #F5A623;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--white);
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    line-height: 22px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: 1200px; margin: 0 auto; padding: 0 64px; }
+  @media (max-width: 800px) { .container { padding: 0 24px; } }
+
+  /* ---- Navigation ---- */
+  nav {
+    height: 80px; display: flex; align-items: center;
+    position: sticky; top: 0; background: var(--bg); z-index: 50;
+    border-bottom: 1px solid var(--border);
+  }
+  nav .container { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+  .wordmark { font-size: 18px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; }
+  .wordmark span { color: var(--red); }
+  .env-status { display: flex; gap: 24px; }
+  .env-item { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text2); }
+  .dot { width: 8px; height: 8px; border-radius: 9999px; background: var(--mid); }
+  .dot.ok { background: var(--success); }
+  .dot.ko { background: var(--red); }
+
+  /* ---- Typo ---- */
+  .hero-title { font-size: 56px; line-height: 64px; font-weight: 200; letter-spacing: -0.02em; }
+  @media (max-width: 800px) { .hero-title { font-size: 36px; line-height: 44px; } }
+  .section-title { font-size: 24px; line-height: 32px; font-weight: 600; margin-bottom: 8px; }
+  .subtitle { font-size: 16px; line-height: 26px; color: var(--text2); font-weight: 400; }
+  .label { display: block; font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text2); margin-bottom: 12px; }
+
+  section { padding-top: 96px; }
+  section:last-of-type { padding-bottom: 120px; }
+
+  /* ---- Panels & cards ---- */
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 48px; }
+  @media (max-width: 800px) { .panel { padding: 24px; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px; transition: border-color 200ms ease; }
+
+  /* ---- Form ---- */
+  .field { margin-bottom: 40px; }
+  input[type="text"], input[type="number"], select {
+    height: 48px; width: 100%; background: var(--surface); color: var(--white);
+    border: 1px solid var(--border); border-radius: 4px; padding: 0 16px;
+    font-family: 'Inter', sans-serif; font-size: 14px; outline: none;
+    transition: border-color 200ms ease;
+  }
+  .panel input[type="text"], .panel input[type="number"], .panel select { background: var(--bg); }
+  input::placeholder { color: var(--mid); }
+  input:focus, select:focus { border-color: var(--white); }
+  select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--mid) 50%), linear-gradient(135deg, var(--mid) 50%, transparent 50%); background-position: calc(100% - 21px) 21px, calc(100% - 16px) 21px; background-size: 5px 5px; background-repeat: no-repeat; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    border: 1px solid var(--border); border-radius: 4px; background: transparent;
+    color: var(--white); font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 400;
+    padding: 6px 16px; cursor: pointer; transition: all 200ms ease; user-select: none;
+  }
+  .chip:hover { border-color: var(--mid); }
+  .chip.selected { background: var(--white); color: var(--bg); border-color: var(--white); }
+  .chip .x { margin-left: 8px; color: inherit; opacity: .55; }
+
+  .dep-wrap { position: relative; }
+  .dep-menu {
+    position: absolute; top: 52px; left: 0; right: 0; max-height: 264px; overflow-y: auto;
+    background: var(--lvl3); border-radius: 4px; z-index: 40; display: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  .dep-menu.open { display: block; }
+  .dep-item { padding: 12px 16px; cursor: pointer; display: flex; justify-content: space-between; font-size: 14px; }
+  .dep-item:hover { background: var(--steel); }
+  .dep-item .code { color: var(--text2); font-weight: 500; }
+
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; }
+  @media (max-width: 800px) { .form-grid { grid-template-columns: 1fr; } }
+
+  /* ---- Toggle ---- */
+  .toggle-row { display: flex; align-items: flex-start; gap: 16px; padding: 24px; border: 1px solid var(--border); border-radius: 8px; }
+  .toggle { position: relative; width: 48px; height: 28px; flex: none; border-radius: 9999px; background: var(--steel); cursor: pointer; transition: background 200ms ease; border: none; }
+  .toggle::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 9999px; background: var(--white); transition: transform 200ms ease; }
+  .toggle.on { background: var(--red); }
+  .toggle.on::after { transform: translateX(20px); }
+  .toggle-text b { display: block; font-size: 14px; font-weight: 500; margin-bottom: 2px; }
+  .toggle-text small { color: var(--text2); font-size: 13px; line-height: 20px; display: block; }
+  .autonomy-warning { display: none; margin-top: 12px; color: var(--warning); font-size: 13px; }
+  .autonomy-warning.visible { display: block; }
+
+  /* ---- Buttons ---- */
+  .btn {
+    height: 48px; padding: 0 32px; border-radius: 4px; border: none; cursor: pointer;
+    background: var(--red); color: var(--white);
+    font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 500;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    transition: all 200ms ease; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    text-decoration: none;
+  }
+  .btn:hover { background: var(--red-hover); box-shadow: 0 0 20px rgba(204,0,0,0.2); }
+  .btn:disabled { background: var(--steel); color: var(--mid); cursor: not-allowed; box-shadow: none; }
+  .btn.xl { height: 56px; width: 100%; font-size: 16px; }
+  .btn.secondary { background: transparent; border: 1px solid var(--mid); }
+  .btn.secondary:hover { border-color: var(--white); background: transparent; box-shadow: none; }
+  .btn.tertiary { background: transparent; padding: 0 8px; height: auto; }
+  .btn.tertiary:hover { box-shadow: none; background: transparent; text-decoration: underline; }
+
+  /* ---- Pipeline steps ---- */
+  .steps { display: flex; align-items: flex-start; margin: 48px 0 24px; }
+  .step { flex: 1; text-align: center; position: relative; }
+  .step:not(:last-child)::after {
+    content: ""; position: absolute; top: 7px; left: calc(50% + 16px); right: calc(-50% + 16px);
+    height: 1px; background: var(--border);
+  }
+  .step .bullet { width: 14px; height: 14px; margin: 0 auto 12px; border-radius: 9999px; border: 1px solid var(--mid); background: transparent; transition: all 200ms ease; }
+  .step .name { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mid); }
+  .step.running .bullet { border-color: var(--red); background: var(--red); box-shadow: 0 0 20px rgba(204,0,0,0.5); animation: pulse 1.2s ease-in-out infinite; }
+  .step.running .name { color: var(--white); }
+  .step.done .bullet { border-color: var(--white); background: var(--white); }
+  .step.done .name { color: var(--text2); }
+  .step.waiting .bullet { border-color: var(--warning); background: var(--warning); }
+  .step.waiting .name { color: var(--warning); }
+  .step.error .bullet { border-color: var(--red); background: transparent; }
+  .step.error .name { color: var(--red); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+  .console {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 20px;
+    padding: 16px 24px; height: 240px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+  }
+  .console .info { color: var(--text2); }
+  .console .warn { color: var(--warning); }
+  .console .error { color: var(--red-hover); }
+  .console .success { color: var(--success); }
+  .run-error { color: var(--red-hover); margin-top: 16px; font-size: 14px; display: none; }
+
+  /* ---- Stats ---- */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; margin-top: 48px; }
+  @media (max-width: 800px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px; text-align: center; }
+  .stat .value { font-size: 36px; line-height: 44px; font-weight: 300; }
+  .stat .name { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text2); margin-top: 4px; }
+
+  /* ---- Offer cards ---- */
+  .offer-list { display: flex; flex-direction: column; gap: 24px; margin-top: 48px; }
+  .offer { display: flex; gap: 32px; align-items: flex-start; }
+  .offer:hover { border-color: var(--mid); }
+  .offer .score { flex: none; width: 96px; text-align: center; }
+  .offer .score .value { font-size: 36px; line-height: 44px; font-weight: 300; }
+  .offer .score .value.low { color: var(--mid); }
+  .offer .score .of { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mid); }
+  .offer .body { flex: 1; min-width: 0; }
+  .offer h3 { font-size: 18px; line-height: 26px; font-weight: 500; margin-bottom: 4px; }
+  .offer .meta-line { color: var(--text2); font-size: 14px; margin-bottom: 12px; }
+  .offer .reason { color: var(--text2); font-size: 13px; line-height: 20px; border-left: 1px solid var(--border); padding-left: 16px; margin-bottom: 16px; }
+  .badge { display: inline-block; border: 1px solid var(--border); border-radius: 2px; padding: 1px 8px; font-size: 11px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text2); margin-left: 12px; vertical-align: 2px; }
+  .badge.email { border-color: var(--success); color: var(--success); }
+  .badge.form { border-color: var(--warning); color: var(--warning); }
+  .badge.applied { border-color: var(--success); color: var(--success); }
+  .offer .actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .offer .links { margin-left: auto; display: flex; gap: 16px; }
+  .offer .links a { color: var(--text2); font-size: 13px; text-decoration: none; }
+  .offer .links a:hover { color: var(--white); text-decoration: underline; }
+  .offer .desc { display: none; margin-top: 16px; color: var(--text2); font-size: 13px; line-height: 21px; white-space: pre-wrap; max-height: 320px; overflow-y: auto; }
+  .offer .desc.open { display: block; }
+  @media (max-width: 800px) { .offer { flex-direction: column; gap: 16px; } }
+
+  .empty { color: var(--mid); margin-top: 48px; font-size: 14px; }
+
+  /* ---- Applied list ---- */
+  .applied-rows { margin-top: 48px; border-top: 1px solid var(--border); }
+  .applied-row { display: flex; align-items: center; gap: 24px; min-height: 48px; padding: 8px 8px; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .applied-row:hover { background: var(--surface); }
+  .applied-row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .applied-row .c { color: var(--text2); flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .applied-row .d { color: var(--mid); flex: none; font-size: 13px; }
+
+  /* ---- Modal ---- */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: 100;
+    display: none; align-items: center; justify-content: center; padding: 24px;
+  }
+  .overlay.open { display: flex; }
+  .modal { background: var(--lvl2); border-radius: 8px; max-width: 680px; width: 100%; max-height: 86vh; overflow-y: auto; padding: 48px; }
+  @media (max-width: 800px) { .modal { padding: 24px; } }
+  .modal h2 { font-size: 24px; font-weight: 600; margin-bottom: 8px; }
+  .modal .sub { color: var(--text2); margin-bottom: 32px; font-size: 14px; }
+  .kv { border-top: 1px solid var(--border); }
+  .kv-row { display: flex; gap: 24px; min-height: 48px; align-items: center; border-bottom: 1px solid var(--border); padding: 8px 0; }
+  .kv-row .k { width: 130px; flex: none; color: var(--text2); font-size: 13px; }
+  .kv-row .v { flex: 1; font-size: 14px; font-weight: 500; word-break: break-all; }
+  .mailbody { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 20px; white-space: pre-wrap; margin: 24px 0 32px; max-height: 260px; overflow-y: auto; color: var(--text2); }
+  .modal .row { display: flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap; }
+  .modal .note { color: var(--warning); font-size: 13px; margin-bottom: 24px; }
+
+  textarea {
+    width: 100%; min-height: 180px; background: var(--bg); color: var(--white);
+    border: 1px solid var(--border); border-radius: 4px; padding: 16px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; outline: none; resize: vertical;
+  }
+  textarea:focus { border-color: var(--white); }
+
+  /* ---- Toast ---- */
+  #toasts { position: fixed; right: 24px; bottom: 24px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+  .toast { background: var(--lvl3); color: var(--white); border-radius: 4px; padding: 12px 20px; font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); max-width: 420px; }
+  .toast.error { border-left: 2px solid var(--red); }
+  .toast.success { border-left: 2px solid var(--success); }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container">
+    <div class="wordmark">JOB<span>O</span>T</div>
+    <div class="env-status">
+      <div class="env-item"><span class="dot" id="dot-cv"></span>CV</div>
+      <div class="env-item"><span class="dot" id="dot-llm"></span>LLM</div>
+      <div class="env-item"><span class="dot" id="dot-smtp"></span>SMTP</div>
+    </div>
+  </div>
+</nav>
+
+<!-- ============ CV manquant : onboarding ============ -->
+<section id="cv-section" class="hidden">
+  <div class="container">
+    <h1 class="hero-title">Commençons par<br>ton CV.</h1>
+    <p class="subtitle" style="margin:24px 0 48px; max-width:560px">
+      jobot adapte ton CV à chaque offre sans jamais rien inventer : il ne fait que
+      sélectionner des éléments de ton CV maître. Importe ton CV existant (HTML ou texte)
+      pour le construire automatiquement.
+    </p>
+    <div class="panel" style="max-width:720px">
+      <div class="field">
+        <label class="label">Fichier CV (.html, .txt)</label>
+        <input type="file" id="cv-file" accept=".html,.htm,.txt,.md" style="color:var(--text2)">
+      </div>
+      <div class="field">
+        <label class="label">Ou colle le texte de ton CV</label>
+        <textarea id="cv-text" placeholder="Colle ici le contenu de ton CV…"></textarea>
+      </div>
+      <button class="btn xl" id="cv-import-btn">Importer mon CV</button>
+      <p class="subtitle" style="font-size:13px; margin-top:24px">
+        L'extraction est faite par le LLM configuré : relis toujours le résultat
+        (data/master-cv.json) avant d'envoyer de vraies candidatures.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Recherche ============ -->
+<section id="search-section" class="hidden">
+  <div class="container">
+    <h1 class="hero-title">Ton prochain poste,<br>en pilote automatique.</h1>
+    <p class="subtitle" style="margin:24px 0 48px; max-width:600px" id="cv-line"></p>
+
+    <div class="panel">
+      <div class="field">
+        <label class="label">Départements</label>
+        <div class="dep-wrap">
+          <input type="text" id="dep-input" placeholder="Cherche un département (nom ou numéro)…" autocomplete="off">
+          <div class="dep-menu" id="dep-menu"></div>
+        </div>
+        <div class="chips" id="dep-chips" style="margin-top:12px"></div>
+      </div>
+
+      <div class="field">
+        <label class="label">Type de contrat</label>
+        <div class="chips" id="contract-chips"></div>
+      </div>
+
+      <div class="field">
+        <label class="label">Type de poste</label>
+        <div class="chips" id="domain-chips"></div>
+      </div>
+
+      <div class="field">
+        <label class="label">Mots-clés supplémentaires — optionnel, séparés par des virgules</label>
+        <input type="text" id="kw-input" placeholder="ex : virtualisation, VMware, Active Directory">
+      </div>
+
+      <div class="form-grid field">
+        <div>
+          <label class="label">Offres publiées depuis</label>
+          <select id="jours">
+            <option value="1">24 heures</option>
+            <option value="3">3 jours</option>
+            <option value="7" selected>7 jours</option>
+            <option value="14">14 jours</option>
+            <option value="31">31 jours</option>
+          </select>
+        </div>
+        <div>
+          <label class="label">Score minimum</label>
+          <input type="number" id="score-min" min="0" max="100" value="60">
+        </div>
+        <div>
+          <label class="label">Sources</label>
+          <div class="chips" id="source-chips" style="padding-top:10px"></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="toggle-row">
+          <button class="toggle on" id="validation-toggle" aria-label="Validation humaine"></button>
+          <div class="toggle-text">
+            <b>Validation humaine avant envoi</b>
+            <small>
+              Activée : la recherche prépare tout (offres, scores, CV adaptés) et
+              chaque candidature attend ta confirmation ici.
+              Désactivée : les candidatures par email partent toutes seules dès que
+              le score dépasse le seuil — les formulaires web, eux, demanderont
+              toujours ton clic final.
+            </small>
+            <span class="autonomy-warning" id="autonomy-warning">
+              Mode autonome : les emails de candidature partiront réellement, sans confirmation.
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn xl" id="launch-btn">Lancer la recherche</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Pipeline ============ -->
+<section id="run-section" class="hidden">
+  <div class="container">
+    <h2 class="section-title">Recherche en cours</h2>
+    <p class="subtitle" id="run-subtitle"></p>
+
+    <div class="steps">
+      <div class="step" data-step="fetch"><div class="bullet"></div><div class="name">Récupération</div></div>
+      <div class="step" data-step="filtre"><div class="bullet"></div><div class="name">Filtrage</div></div>
+      <div class="step" data-step="score"><div class="bullet"></div><div class="name">Scoring</div></div>
+      <div class="step" data-step="generation"><div class="bullet"></div><div class="name">CV adaptés</div></div>
+      <div class="step" data-step="envoi"><div class="bullet"></div><div class="name">Envoi</div></div>
+    </div>
+
+    <div class="console" id="console"></div>
+    <div class="run-error" id="run-error"></div>
+    <div style="margin-top:24px">
+      <button class="btn secondary" id="cancel-btn">Interrompre</button>
+    </div>
+
+    <div class="stats" id="stats"></div>
+  </div>
+</section>
+
+<!-- ============ Validation ============ -->
+<section id="validate-section" class="hidden">
+  <div class="container">
+    <h2 class="section-title">Candidatures à valider</h2>
+    <p class="subtitle">
+      Dernière étape humaine : vérifie le CV adapté, puis envoie ou écarte.
+      Les offres « formulaire » s'ouvrent dans un navigateur — jobot pré-remplit,
+      toi seul cliques sur envoyer.
+    </p>
+    <div class="offer-list" id="offer-list"></div>
+    <div class="empty hidden" id="offer-empty">Aucune candidature en attente. Lance une recherche ci-dessus.</div>
+  </div>
+</section>
+
+<!-- ============ Envoyées ============ -->
+<section id="applied-section" class="hidden">
+  <div class="container">
+    <h2 class="section-title">Candidatures envoyées</h2>
+    <div class="applied-rows" id="applied-rows"></div>
+  </div>
+</section>
+
+<!-- ============ Modale : validation email ============ -->
+<div class="overlay" id="apply-overlay">
+  <div class="modal">
+    <h2>Valider l'envoi</h2>
+    <p class="sub" id="apply-offer-title"></p>
+    <div class="kv" id="apply-kv"></div>
+    <div class="mailbody" id="apply-body"></div>
+    <p class="note hidden" id="apply-smtp-note">
+      SMTP non configuré : renseigne SMTP_HOST / SMTP_USER / SMTP_PASSWORD dans le
+      fichier .env puis relance <b>jobot ui</b> pour pouvoir envoyer.
+    </p>
+    <div class="row">
+      <a class="btn tertiary" id="apply-pdf" target="_blank">Voir le CV joint</a>
+      <button class="btn secondary" data-close>Annuler</button>
+      <button class="btn" id="apply-confirm">Confirmer l'envoi</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ Modale : assistant formulaire ============ -->
+<div class="overlay" id="assist-overlay">
+  <div class="modal">
+    <h2>Assistant de candidature</h2>
+    <p class="sub" id="assist-sub">
+      Un navigateur vient de s'ouvrir sur l'offre. Remplis le formulaire avec les
+      informations ci-dessous, joins le CV, et clique toi-même sur envoyer.
+      Ferme ensuite la fenêtre du navigateur.
+    </p>
+    <div class="kv" id="assist-kv"></div>
+    <div class="row" style="margin-top:32px" id="assist-wait-row">
+      <span class="subtitle" style="font-size:13px; margin-right:auto">En attente de la fermeture du navigateur…</span>
+      <a class="btn tertiary" id="assist-pdf" target="_blank">Voir le CV</a>
+    </div>
+    <div class="row hidden" style="margin-top:32px" id="assist-done-row">
+      <span class="subtitle" style="font-size:14px; margin-right:auto">Candidature envoyée ?</span>
+      <button class="btn secondary" id="assist-no">Pas encore</button>
+      <button class="btn" id="assist-yes">Oui, envoyée</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const api = async (path, opts = {}) => {
+  const resp = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...opts,
+  });
+  if (!resp.ok) {
+    let detail = resp.statusText;
+    try { detail = (await resp.json()).detail || detail; } catch (e) { /* texte brut */ }
+    throw new Error(detail);
+  }
+  return resp.json();
+};
+
+const state = {
+  meta: null,
+  deps: new Set(),
+  domaines: new Set(),
+  contrat: "alternance",
+  sources: new Set(),
+  validation: true,
+  running: false,
+  lastLogCount: -1,
+  assistOffer: null,
+  applyOffer: null,
+};
+
+function toast(msg, kind = "info") {
+  const el = document.createElement("div");
+  el.className = `toast ${kind}`;
+  el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 6000);
+}
+
+function esc(text) {
+  const d = document.createElement("div");
+  d.textContent = text ?? "";
+  return d.innerHTML;
+}
+
+/* ================= Formulaire ================= */
+
+function chipRow(containerId, items, selectedSet, { single = false, onchange = null } = {}) {
+  const box = $(containerId);
+  box.innerHTML = "";
+  for (const item of items) {
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "chip" + (selectedSet.has(item.id) ? " selected" : "");
+    el.textContent = item.label;
+    el.onclick = () => {
+      if (single) { selectedSet.clear(); selectedSet.add(item.id); }
+      else if (selectedSet.has(item.id)) selectedSet.delete(item.id);
+      else selectedSet.add(item.id);
+      chipRow(containerId, items, selectedSet, { single, onchange });
+      if (onchange) onchange();
+    };
+    box.appendChild(el);
+  }
+}
+
+function renderDepChips() {
+  const box = $("dep-chips");
+  box.innerHTML = "";
+  const byCode = new Map(state.meta.departements.map((d) => [d.code, d.nom]));
+  for (const code of state.deps) {
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "chip selected";
+    el.innerHTML = `${esc(code)} — ${esc(byCode.get(code) || "?")}<span class="x">✕</span>`;
+    el.onclick = () => { state.deps.delete(code); renderDepChips(); };
+    box.appendChild(el);
+  }
+}
+
+function setupDepPicker() {
+  const input = $("dep-input");
+  const menu = $("dep-menu");
+  const norm = (s) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+  const refresh = () => {
+    const q = norm(input.value.trim());
+    const hits = state.meta.departements.filter(
+      (d) => !state.deps.has(d.code) && (!q || norm(d.nom).includes(q) || d.code.startsWith(q))
+    ).slice(0, 12);
+    menu.innerHTML = "";
+    for (const d of hits) {
+      const el = document.createElement("div");
+      el.className = "dep-item";
+      el.innerHTML = `<span>${esc(d.nom)}</span><span class="code">${esc(d.code)}</span>`;
+      el.onclick = () => {
+        state.deps.add(d.code);
+        input.value = "";
+        renderDepChips();
+        menu.classList.remove("open");
+      };
+      menu.appendChild(el);
+    }
+    menu.classList.toggle("open", hits.length > 0 && document.activeElement === input);
+  };
+  input.addEventListener("input", refresh);
+  input.addEventListener("focus", refresh);
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".dep-wrap")) menu.classList.remove("open");
+  });
+}
+
+function setValidation(on) {
+  state.validation = on;
+  $("validation-toggle").classList.toggle("on", on);
+  $("autonomy-warning").classList.toggle("visible", !on);
+}
+
+function initForm() {
+  const m = state.meta;
+  const d = m.defaults;
+
+  state.deps = new Set(d.departements || []);
+  state.domaines = new Set((d.domaines || []).filter((x) => m.domaines.some((dm) => dm.id === x)));
+  state.contrat = d.contrat || "alternance";
+  state.sources = new Set(d.sources && d.sources.length ? d.sources : m.sources);
+  $("kw-input").value = (d.mots_cles || []).join(", ");
+  $("jours").value = String(d.jours || 7);
+  $("score-min").value = String(d.score_min ?? 60);
+  setValidation(d.validation_humaine !== false);
+
+  const contratSel = new Set([state.contrat]);
+  chipRow("contract-chips", m.contrats, contratSel, {
+    single: true,
+    onchange: () => { state.contrat = [...contratSel][0]; },
+  });
+  chipRow("domain-chips", m.domaines, state.domaines);
+  chipRow("source-chips",
+    m.sources.map((s) => ({ id: s, label: s === "francetravail" ? "France Travail" : "APEC" })),
+    state.sources);
+  renderDepChips();
+  setupDepPicker();
+
+  $("validation-toggle").onclick = () => setValidation(!state.validation);
+  $("launch-btn").onclick = launch;
+  $("cancel-btn").onclick = () => api("/api/cancel", { method: "POST" }).catch((e) => toast(e.message, "error"));
+}
+
+function buildParams() {
+  return {
+    departements: [...state.deps],
+    contrat: state.contrat,
+    domaines: [...state.domaines],
+    mots_cles: $("kw-input").value.split(",").map((s) => s.trim()).filter(Boolean),
+    jours: parseInt($("jours").value, 10),
+    sources: [...state.sources],
+    validation_humaine: state.validation,
+    score_min: Math.max(0, Math.min(100, parseInt($("score-min").value, 10) || 60)),
+  };
+}
+
+async function launch() {
+  const params = buildParams();
+  if (!params.departements.length) return toast("Choisis au moins un département.", "error");
+  if (!params.domaines.length && !params.mots_cles.length)
+    return toast("Choisis au moins un type de poste ou un mot-clé.", "error");
+  if (!params.sources.length) return toast("Choisis au moins une source.", "error");
+  if (!params.validation_humaine) {
+    const ok = confirm(
+      "Mode autonome : les candidatures par email seront réellement envoyées " +
+      "sans confirmation individuelle. Continuer ?"
+    );
+    if (!ok) return;
+  }
+  try {
+    await api("/api/search", { method: "POST", body: JSON.stringify(params) });
+    $("run-section").classList.remove("hidden");
+    $("run-section").scrollIntoView({ behavior: "smooth" });
+    poll(true);
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+/* ================= Suivi du run ================= */
+
+function renderRun(run) {
+  const started = run.started_at != null;
+  $("run-section").classList.toggle("hidden", !started);
+  if (!started) return;
+
+  for (const el of document.querySelectorAll(".step")) {
+    const s = run.steps[el.dataset.step] || "pending";
+    el.className = "step " + (s === "pending" ? "" : s);
+    if (el.dataset.step === "envoi") {
+      el.querySelector(".name").textContent = s === "waiting" ? "Ta validation" : "Envoi";
+    }
+  }
+
+  $("run-subtitle").textContent = run.running
+    ? "Le pipeline travaille — tout est automatique jusqu'à la validation."
+    : run.error
+      ? "La recherche s'est arrêtée."
+      : run.validation_humaine
+        ? "Recherche terminée. Les candidatures t'attendent ci-dessous."
+        : "Recherche terminée en mode autonome.";
+
+  $("cancel-btn").style.display = run.running ? "" : "none";
+  const err = $("run-error");
+  err.style.display = run.error ? "block" : "none";
+  err.textContent = run.error || "";
+
+  if (run.logs.length !== state.lastLogCount) {
+    state.lastLogCount = run.logs.length;
+    const box = $("console");
+    box.innerHTML = run.logs.map((l) => {
+      const t = new Date(l.ts * 1000).toLocaleTimeString("fr-FR");
+      return `<div class="${esc(l.level)}">[${t}] ${esc(l.message)}</div>`;
+    }).join("");
+    box.scrollTop = box.scrollHeight;
+  }
+}
+
+function renderStats(stats) {
+  const s = stats.by_status || {};
+  const total = Object.values(s).reduce((a, b) => a + b, 0);
+  const items = [
+    { name: "Offres analysées", value: total },
+    { name: "Retenues", value: (s.new || 0) + (s.scored || 0) + (s.queued || 0) + (s.applied || 0) },
+    { name: "À valider", value: (s.scored || 0) + (s.queued || 0) },
+    { name: "Envoyées", value: s.applied || 0 },
+  ];
+  $("stats").innerHTML = items.map(
+    (it) => `<div class="stat"><div class="value">${it.value}</div><div class="name">${it.name}</div></div>`
+  ).join("");
+}
+
+let pollTimer = null;
+async function poll(fast = false) {
+  clearTimeout(pollTimer);
+  try {
+    const snap = await api("/api/state");
+    const wasRunning = state.running;
+    state.running = snap.run.running;
+    renderRun(snap.run);
+    renderStats(snap.stats);
+    handleAssistState(snap.assist);
+    if (wasRunning && !snap.run.running) {
+      await refreshOffers();
+      toast(snap.run.error ? "Recherche arrêtée : " + snap.run.error : "Recherche terminée.",
+            snap.run.error ? "error" : "success");
+    } else if (snap.run.running) {
+      await refreshOffers();
+    }
+  } catch (e) { /* serveur en cours de redemarrage : on retentera */ }
+  pollTimer = setTimeout(() => poll(), state.running || fast ? 1500 : 5000);
+}
+
+/* ================= Offres / validation ================= */
+
+function offerCard(o) {
+  const low = (o.score ?? 0) < (state.meta.defaults.score_min ?? 60);
+  const badge = o.channel === "email"
+    ? '<span class="badge email">Email</span>'
+    : o.channel === "form"
+      ? '<span class="badge form">Formulaire</span>'
+      : '<span class="badge">?</span>';
+  const queuedNote = o.status === "queued" && o.channel === "form"
+    ? '<span class="badge form">action requise</span>' : "";
+
+  const primary = o.channel === "email"
+    ? `<button class="btn" data-act="apply" data-id="${esc(o.id)}">Valider &amp; envoyer</button>`
+    : `<button class="btn" data-act="assist" data-id="${esc(o.id)}">Ouvrir l'assistant</button>`;
+
+  return `<div class="card offer" data-id="${esc(o.id)}">
+    <div class="score">
+      <div class="value ${low ? "low" : ""}">${o.score ?? "—"}</div>
+      <div class="of">/ 100</div>
+    </div>
+    <div class="body">
+      <h3>${esc(o.title)}${badge}${queuedNote}</h3>
+      <div class="meta-line">${esc(o.company || "—")} · ${esc(o.location || "—")} · ${esc(o.contract || "—")}</div>
+      ${o.score_reason ? `<div class="reason">${esc(o.score_reason)}</div>` : ""}
+      <div class="actions">
+        ${primary}
+        <button class="btn secondary" data-act="skip" data-id="${esc(o.id)}">Écarter</button>
+        <div class="links">
+          <a href="/api/offers/${encodeURIComponent(o.id)}/cv.pdf" target="_blank">CV adapté (PDF)</a>
+          ${o.url ? `<a href="${esc(o.url)}" target="_blank" rel="noopener">Offre originale</a>` : ""}
+          <a href="#" data-act="toggle-desc" data-id="${esc(o.id)}">Description</a>
+        </div>
+      </div>
+      <div class="desc" id="desc-${esc(o.id)}"></div>
+    </div>
+  </div>`;
+}
+
+async function refreshOffers() {
+  const [pending, applied] = await Promise.all([
+    api("/api/offers?statuts=scored,queued&limite=200"),
+    api("/api/offers?statuts=applied&limite=100"),
+  ]);
+
+  $("validate-section").classList.remove("hidden");
+  $("offer-list").innerHTML = pending.map(offerCard).join("");
+  $("offer-empty").classList.toggle("hidden", pending.length > 0);
+
+  $("applied-section").classList.toggle("hidden", applied.length === 0);
+  $("applied-rows").innerHTML = applied.map((o) => `
+    <div class="applied-row">
+      <span class="badge applied">envoyée</span>
+      <span class="t">${esc(o.title)}</span>
+      <span class="c">${esc(o.company || "—")}</span>
+      <span class="d">${o.applied_at ? new Date(o.applied_at).toLocaleDateString("fr-FR") : ""}</span>
+    </div>`).join("");
+
+  for (const btn of document.querySelectorAll("[data-act]")) {
+    const id = btn.dataset.id;
+    if (btn.dataset.act === "apply") btn.onclick = () => openApplyModal(id);
+    if (btn.dataset.act === "assist") btn.onclick = () => startAssist(id);
+    if (btn.dataset.act === "skip") btn.onclick = () => skipOffer(id);
+    if (btn.dataset.act === "toggle-desc") btn.onclick = (e) => { e.preventDefault(); toggleDesc(id); };
+  }
+}
+
+async function toggleDesc(id) {
+  const box = $("desc-" + id);
+  if (!box) return;
+  if (box.classList.contains("open")) { box.classList.remove("open"); return; }
+  if (!box.textContent) {
+    try {
+      const o = await api("/api/offers/" + encodeURIComponent(id));
+      box.textContent = o.description || "(vide)";
+    } catch (e) { box.textContent = e.message; }
+  }
+  box.classList.add("open");
+}
+
+async function skipOffer(id) {
+  try {
+    await api("/api/offers/" + encodeURIComponent(id) + "/skip", { method: "POST" });
+    await refreshOffers();
+  } catch (e) { toast(e.message, "error"); }
+}
+
+/* ---- Modale email ---- */
+
+async function openApplyModal(id) {
+  try {
+    const [offer, preview] = await Promise.all([
+      api("/api/offers/" + encodeURIComponent(id)),
+      api("/api/offers/" + encodeURIComponent(id) + "/preview"),
+    ]);
+    state.applyOffer = id;
+    $("apply-offer-title").textContent = `${offer.title} — ${offer.company || "—"}`;
+    $("apply-kv").innerHTML = `
+      <div class="kv-row"><span class="k">Destinataire</span><span class="v">${esc(preview.to)}</span></div>
+      ${preview.from ? `<div class="kv-row"><span class="k">Expéditeur</span><span class="v">${esc(preview.from)}</span></div>` : ""}
+      <div class="kv-row"><span class="k">Objet</span><span class="v">${esc(preview.subject)}</span></div>`;
+    $("apply-body").textContent = preview.body;
+    $("apply-pdf").href = "/api/offers/" + encodeURIComponent(id) + "/cv.pdf";
+    $("apply-smtp-note").classList.toggle("hidden", preview.smtp_ok);
+    $("apply-confirm").disabled = !preview.smtp_ok;
+    $("apply-overlay").classList.add("open");
+  } catch (e) { toast(e.message, "error"); }
+}
+
+async function confirmApply() {
+  const id = state.applyOffer;
+  if (!id) return;
+  const btn = $("apply-confirm");
+  btn.disabled = true;
+  btn.textContent = "Envoi…";
+  try {
+    await api("/api/offers/" + encodeURIComponent(id) + "/apply", { method: "POST" });
+    toast("Candidature envoyée.", "success");
+    $("apply-overlay").classList.remove("open");
+    await refreshOffers();
+    poll();
+  } catch (e) {
+    toast(e.message, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Confirmer l'envoi";
+  }
+}
+
+/* ---- Assistant formulaire ---- */
+
+async function startAssist(id) {
+  try {
+    const res = await api("/api/offers/" + encodeURIComponent(id) + "/assist", { method: "POST" });
+    state.assistOffer = id;
+    $("assist-kv").innerHTML = res.fields.map((f) => `
+      <div class="kv-row"><span class="k">${esc(f.label)}</span><span class="v">${esc(f.value)}</span></div>`).join("");
+    $("assist-pdf").href = "/api/offers/" + encodeURIComponent(id) + "/cv.pdf";
+    $("assist-wait-row").classList.remove("hidden");
+    $("assist-done-row").classList.add("hidden");
+    $("assist-sub").textContent =
+      "Un navigateur vient de s'ouvrir sur l'offre. Remplis le formulaire avec les " +
+      "informations ci-dessous, joins le CV, et clique toi-même sur envoyer. " +
+      "Ferme ensuite la fenêtre du navigateur.";
+    $("assist-overlay").classList.add("open");
+    poll(true);
+  } catch (e) { toast(e.message, "error"); }
+}
+
+function handleAssistState(assist) {
+  if (!state.assistOffer) return;
+  if (assist.status === "closed") {
+    $("assist-wait-row").classList.add("hidden");
+    $("assist-done-row").classList.remove("hidden");
+    $("assist-sub").textContent = "Navigateur fermé.";
+  } else if (assist.status === "error") {
+    toast("Assistant : " + (assist.error || "erreur"), "error");
+    $("assist-overlay").classList.remove("open");
+    state.assistOffer = null;
+    api("/api/assist/done", { method: "POST", body: JSON.stringify({ applied: false }) }).catch(() => {});
+  }
+}
+
+async function assistFinish(applied) {
+  try {
+    await api("/api/assist/done", { method: "POST", body: JSON.stringify({ applied }) });
+  } catch (e) { toast(e.message, "error"); }
+  state.assistOffer = null;
+  $("assist-overlay").classList.remove("open");
+  await refreshOffers();
+  poll();
+}
+
+/* ---- Import CV ---- */
+
+async function importCv() {
+  const fileInput = $("cv-file");
+  let content = $("cv-text").value;
+  let filename = "";
+  if (fileInput.files.length) {
+    filename = fileInput.files[0].name;
+    content = await fileInput.files[0].text();
+  }
+  if (!content.trim()) return toast("Choisis un fichier ou colle le texte de ton CV.", "error");
+
+  const btn = $("cv-import-btn");
+  btn.disabled = true;
+  btn.textContent = "Extraction par le LLM…";
+  try {
+    const cv = await api("/api/cv/import", {
+      method: "POST",
+      body: JSON.stringify({ content, filename, force: true }),
+    });
+    toast(`CV maître créé pour ${cv.name}. Relis data/master-cv.json !`, "success");
+    state.meta.cv = cv;
+    showSections();
+  } catch (e) {
+    toast(e.message, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Importer mon CV";
+  }
+}
+
+/* ================= Bootstrap ================= */
+
+function showSections() {
+  const cvOk = state.meta.cv.present && state.meta.cv.valid !== false;
+  $("cv-section").classList.toggle("hidden", cvOk);
+  $("search-section").classList.toggle("hidden", !cvOk);
+  if (cvOk) {
+    $("cv-line").textContent =
+      `CV maître : ${state.meta.cv.name} — ${state.meta.cv.headline}. ` +
+      "Choisis tes critères, lance, et ne reviens que pour valider.";
+  }
+  $("dot-cv").className = "dot " + (cvOk ? "ok" : "ko");
+  $("dot-llm").className = "dot " + (state.meta.llm_ok ? "ok" : "ko");
+  $("dot-smtp").className = "dot " + (state.meta.smtp_ok ? "ok" : "");
+  $("dot-smtp").title = state.meta.smtp_ok ? "" : "SMTP non configuré : envoi email indisponible";
+}
+
+async function init() {
+  try {
+    state.meta = await api("/api/meta");
+  } catch (e) {
+    toast("Impossible de joindre le serveur jobot : " + e.message, "error");
+    return;
+  }
+  initForm();
+  showSections();
+  $("cv-import-btn").onclick = importCv;
+  $("apply-confirm").onclick = confirmApply;
+  $("assist-yes").onclick = () => assistFinish(true);
+  $("assist-no").onclick = () => assistFinish(false);
+  for (const el of document.querySelectorAll("[data-close]")) {
+    el.onclick = () => el.closest(".overlay").classList.remove("open");
+  }
+  if (!state.meta.llm_ok) {
+    toast("LLM non configuré (JOBOT_LLM_*) : le scoring échouera. Voir .env.", "error");
+  }
+  await refreshOffers();
+  poll(true);
+}
+
+init();
+</script>
+</body>
+</html>

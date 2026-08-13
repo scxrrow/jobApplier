@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import db
+from . import db, pipeline
 from .config import settings
 from .cv import (
     EXAMPLE_CV_PATH,
@@ -17,21 +17,10 @@ from .cv import (
     load_master_cv,
     save_master_cv,
 )
-from .filters import FilterRules
 from .assist import apply_url, clipboard_fields, open_application_page
 from .llm import LLMError, build_client
 from .mailer import build_message, build_subject, send_message
 from .models import Channel, Status
-from .render import render_html, render_pdf
-from .scoring import score_offer
-from .sources import (
-    ApecClient,
-    ApecError,
-    FranceTravailClient,
-    FranceTravailError,
-    parse_apec_offer,
-    parse_ft_offer,
-)
 
 app = typer.Typer(add_completion=False, help="Pipeline de candidature automatisee.")
 cv_app = typer.Typer(help="Gestion du CV maitre (data/master-cv.json).")
@@ -48,60 +37,45 @@ def _llm_client():
         raise typer.Exit(1)
 
 
-SOURCE_NAMES = ("francetravail", "apec")
+def _console_log(level: str, message: str) -> None:
+    """Adapte le journal du pipeline aux couleurs rich du terminal."""
+    colors = {"warn": "yellow", "error": "red", "success": "green"}
+    color = colors.get(level)
+    console.print(f"[{color}]{message}[/{color}]" if color else message)
 
 
-def _fetch_source(
-    name: str,
-    *,
-    jours: int,
-    max_par_requete: int,
-    offers: list,
-    raws: dict,
-    seen: set[str],
+def _env_params(**overrides) -> pipeline.SearchParams:
+    """Criteres de recherche construits depuis le .env, pour les commandes CLI."""
+    return pipeline.SearchParams(
+        departements=settings.departements,
+        contrat="alternance" if settings.jobot_alternance_only else "tous",
+        mots_cles=settings.mots_cles,
+        sources=settings.sources,
+        **overrides,
+    )
+
+
+@app.command()
+def ui(
+    host: str = typer.Option("127.0.0.1", help="Adresse d'ecoute du serveur local."),
+    port: int = typer.Option(8321, help="Port d'ecoute."),
+    ouvrir: bool = typer.Option(
+        True, "--ouvrir/--sans-ouvrir", help="Ouvrir le navigateur au lancement."
+    ),
 ) -> None:
-    """Interroge une source sur toutes les combinaisons departement x mot-cle."""
-    if name == "francetravail":
-        client = FranceTravailClient(settings.ft_client_id, settings.ft_client_secret)
-        parse, error = parse_ft_offer, FranceTravailError
-    else:
-        client = ApecClient()
-        parse, error = parse_apec_offer, ApecError
+    """Lance l'interface web : recherche automatisee de bout en bout + validation."""
+    import threading
+    import webbrowser
 
-    # Une requete par (departement x mot-cle) : aucune des deux API ne fait de
-    # OU sur les mots-cles, on croise donc nous-memes puis on dedoublonne.
-    combos = [
-        (dep, kw)
-        for dep in (settings.departements or [None])
-        for kw in (settings.mots_cles or [None])
-    ]
+    import uvicorn
 
-    with client:
-        for dep, kw in combos:
-            label = f"dep={dep or '*'} kw={kw or '*'}"
-            try:
-                raw_offers = client.search(
-                    mots_cles=kw,
-                    departement=dep,
-                    alternance=settings.jobot_alternance_only,
-                    publiee_depuis=jours,
-                    max_results=max_par_requete,
-                )
-            except error as exc:
-                console.print(f"[yellow]{label} : {exc}[/yellow]")
-                continue
+    from .web import app as web_app
 
-            fresh = 0
-            for raw in raw_offers:
-                offer = parse(raw)
-                if offer.id in seen:
-                    continue
-                seen.add(offer.id)
-                offers.append(offer)
-                raws[offer.id] = raw
-                fresh += 1
-
-            console.print(f"  {label:<45} {len(raw_offers):>4} recues, {fresh:>4} uniques")
+    url = f"http://{host}:{port}"
+    console.print(f"[bold]Interface jobot :[/bold] {url}  [dim](Ctrl-C pour arreter)[/dim]")
+    if ouvrir:
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    uvicorn.run(web_app, host=host, port=port, log_level="warning")
 
 
 @app.command()
@@ -112,11 +86,11 @@ def fetch(
 ) -> None:
     """Recupere les offres des sources configurees et les stocke en base."""
     sources = settings.sources
-    unknown = [name for name in sources if name not in SOURCE_NAMES]
+    unknown = [name for name in sources if name not in pipeline.SOURCE_NAMES]
     if unknown:
         console.print(
             f"[red]Source inconnue : {', '.join(unknown)}.[/red] "
-            f"JOBOT_SOURCES accepte : {', '.join(SOURCE_NAMES)}."
+            f"JOBOT_SOURCES accepte : {', '.join(pipeline.SOURCE_NAMES)}."
         )
         raise typer.Exit(1)
 
@@ -127,26 +101,8 @@ def fetch(
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1)
 
-    rules = FilterRules(
-        departements=settings.departements,
-        mots_cles=settings.mots_cles,
-        alternance_only=settings.jobot_alternance_only,
-    )
-
-    offers, raws = [], {}
-    seen: set[str] = set()
-
-    for name in sources:
-        console.print(f"[bold]{name}[/bold]")
-        _fetch_source(
-            name,
-            jours=jours,
-            max_par_requete=max_par_requete,
-            offers=offers,
-            raws=raws,
-            seen=seen,
-        )
-
+    params = _env_params(jours=jours, max_par_requete=max_par_requete)
+    offers, raws = pipeline.fetch_offers(params, _console_log)
     console.print(f"\n[bold]{len(offers)}[/bold] offres uniques recuperees.")
 
     if dry_run:
@@ -159,20 +115,7 @@ def fetch(
         f"Base : [green]{new} nouvelles[/green], "
         f"[yellow]{updated} mises a jour[/yellow], {unchanged} inchangees."
     )
-
-    # Filtrage a regles sur tout ce qui est en attente de traitement.
-    rows = conn.execute("SELECT * FROM offers WHERE status = ?", (str(Status.NEW),)).fetchall()
-    rejected = 0
-    for row in rows:
-        offer = _offer_from_row(row)
-        reason = rules.check(offer)
-        if reason:
-            db.mark_filtered(conn, offer.id, reason)
-            rejected += 1
-    conn.commit()
-
-    kept = len(rows) - rejected
-    console.print(f"Filtres : [red]{rejected} ecartees[/red], [green]{kept} retenues[/green].")
+    pipeline.apply_filters(conn, params.rules(), _console_log)
     conn.close()
 
 
@@ -191,45 +134,16 @@ def score(
     client = _llm_client()
 
     conn = db.connect(settings.db_path)
-    rows = conn.execute(
-        "SELECT * FROM offers WHERE status = ? ORDER BY published_at DESC LIMIT ?",
-        (str(Status.NEW), limite),
-    ).fetchall()
-
-    if not rows:
+    scored = pipeline.score_pending(
+        conn,
+        _env_params(limite_score=limite),
+        _console_log,
+        client=client,
+        cv=cv,
+    )
+    if scored == 0:
         console.print("[dim]Aucune offre au statut 'new' a scorer.[/dim]")
-        return
-
-    for row in rows:
-        offer = _offer_from_row(row)
-        try:
-            result = score_offer(client, offer, cv)
-        except Exception as exc:  # noqa: BLE001 - on continue sur les autres offres
-            console.print(f"[red]{offer.title[:50]:<50}[/red] echec : {exc}")
-            continue
-
-        db.save_score(conn, offer.id, result.score, result.reason, result.selected_ids)
-        conn.commit()
-
-        color = "green" if result.score >= 70 else "yellow" if result.score >= 40 else "red"
-        console.print(f"[{color}]{result.score:>3}[/{color}]  {offer.title[:60]}")
-        if result.dropped_ids:
-            console.print(f"      [dim]id hallucines ecartes : {result.dropped_ids}[/dim]")
-
     conn.close()
-
-
-def _build_cv_files(row, cv, out_dir: Path) -> tuple[Path, Path]:
-    """Rend le CV adapte a une offre. Retourne (html_path, pdf_path)."""
-    html = render_html(cv, json.loads(row["cv_selection"]))
-    safe_id = row["id"].replace(":", "_").replace("/", "_")
-    html_path = out_dir / f"{safe_id}.html"
-    pdf_path = out_dir / f"{safe_id}.pdf"
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(html, encoding="utf-8")
-    render_pdf(html, pdf_path)
-    return html_path, pdf_path
 
 
 def _require_scored(row, offer_id: str):
@@ -263,7 +177,7 @@ def generate(
 
     cv = load_master_cv(settings.cv_path)
     try:
-        html_path, pdf_path = _build_cv_files(row, cv, out_dir or settings.out_dir)
+        html_path, pdf_path = pipeline.build_cv_files(row, cv, out_dir or settings.out_dir)
     except Exception as exc:  # noqa: BLE001 - message lisible plutot qu'une trace
         console.print(f"[red]Generation du PDF en echec : {exc}[/red]")
         console.print("[dim]Navigateur installe ? uv run playwright install chromium[/dim]")
@@ -382,9 +296,9 @@ def send(
         console.print()
 
     for row in rows:
-        offer = _offer_from_row(row)
+        offer = pipeline.offer_from_row(row)
         try:
-            _, pdf_path = _build_cv_files(row, cv, settings.out_dir)
+            _, pdf_path = pipeline.build_cv_files(row, cv, settings.out_dir)
             msg = build_message(settings=settings, cv=cv, offer=offer, pdf_path=pdf_path)
         except Exception as exc:  # noqa: BLE001 - on continue sur les autres offres
             console.print(f"[red]{offer.title[:45]:<45}[/red] preparation en echec : {exc}")
@@ -428,7 +342,7 @@ def assist(offer_id: str) -> None:
     row = conn.execute("SELECT * FROM offers WHERE id = ?", (offer_id,)).fetchone()
     _require_scored(row, offer_id)
 
-    offer = _offer_from_row(row)
+    offer = pipeline.offer_from_row(row)
     url = apply_url(offer)
     if not url:
         console.print(f"[red]Aucune URL de candidature pour {offer_id}.[/red]")
@@ -437,7 +351,7 @@ def assist(offer_id: str) -> None:
 
     cv = load_master_cv(settings.cv_path)
     try:
-        _, pdf_path = _build_cv_files(row, cv, settings.out_dir)
+        _, pdf_path = pipeline.build_cv_files(row, cv, settings.out_dir)
     except Exception as exc:  # noqa: BLE001 - message lisible plutot qu'une trace
         console.print(f"[red]Generation du CV en echec : {exc}[/red]")
         conn.close()
@@ -671,29 +585,6 @@ def stats() -> None:
 
     conn.close()
 
-
-def _offer_from_row(row) -> "object":
-    from .models import Offer
-
-    return Offer(
-        source=row["source"],
-        native_id=row["native_id"],
-        title=row["title"],
-        company=row["company"],
-        description=row["description"],
-        contract_type=row["contract_type"],
-        contract_label=row["contract_label"],
-        location=row["location"],
-        postal_code=row["postal_code"],
-        department=row["department"],
-        salary=row["salary"],
-        experience=row["experience"],
-        is_alternance=bool(row["is_alternance"]),
-        apply_email=row["apply_email"],
-        apply_url=row["apply_url"],
-        origin_url=row["origin_url"],
-        published_at=row["published_at"],
-    )
 
 
 if __name__ == "__main__":
