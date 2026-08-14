@@ -1,14 +1,20 @@
 # jobot
 
-Automatise une recherche d'alternance/emploi : récupère des offres, les note
-par rapport à ton profil, génère un CV adapté à chacune, et t'aide à
-candidater — par email automatiquement, ou en te préparant le formulaire
-quand un humain doit cliquer.
+Agrège des offres depuis plusieurs sites d'emploi, les note par rapport à ton
+profil, puis prépare pour chacune un **dossier de candidature** : un CV adapté
+à l'offre et une lettre de motivation. Tu n'as plus qu'à cliquer sur *Postuler*,
+qui t'ouvre l'offre sur son site — tu y déposes les deux PDF.
 
-Par défaut, rien ne part sans validation explicite : le pipeline propose,
-tu confirmes chaque envoi. La validation peut être désactivée au lancement
-d'une recherche pour un mode entièrement autonome — c'est un choix explicite,
-confirmé dans l'interface.
+**jobot ne remplit aucun formulaire de candidature.** C'est un choix : chaque
+plateforme de recrutement a le sien, et aucune automatisation ne tient sur
+l'ensemble. Le temps qu'elle faisait perdre est réinvesti là où il rapporte —
+ratisser plus de sites, et soigner le dossier envoyé.
+
+Une exception : quand l'offre publie une vraie adresse de contact, la
+candidature part par email depuis jobot, pièces jointes comprises. Rien ne part
+sans validation explicite ; la validation peut être désactivée au lancement
+d'une recherche pour un mode autonome, choix explicite confirmé dans
+l'interface.
 
 ## L'interface web
 
@@ -37,45 +43,43 @@ toucher au terminal une fois lancée :
    Tes derniers critères sont mémorisés (`data/ui-params.json`).
 3. **Lance.** Tout s'enchaîne automatiquement : récupération, filtrage,
    scoring LLM, génération des CV adaptés — jusqu'à l'écran de validation.
-4. **Valide.** Chaque candidature attend ta décision. Canal email : tu vois
-   le destinataire, l'objet, le corps et le CV joint avant de confirmer
-   l'envoi. Canal formulaire : après ta validation, un navigateur s'ouvre et
-   remplit le formulaire sous tes yeux — champs reconnus, CV joint, clic sur
-   envoyer — tu peux corriger ou reprendre la main à tout moment (le
-   remplissage est heuristique : selon le site, il peut rester des champs à
-   compléter, la fenêtre te le montre). Le toggle « candidature
-   automatique » repasse en mode 100 % manuel si tu préfères.
+4. **Récupère tes dossiers.** Chaque offre a son CV adapté et sa lettre.
+   - *Canal email* : tu vois le destinataire, l'objet, le corps et les pièces
+     jointes avant de confirmer l'envoi, qui part depuis jobot.
+   - *Canal site* : « Ouvrir le dossier » affiche les deux PDF, le texte de la
+     lettre à relire, et le lien vers la page de candidature. Tu déposes, puis
+     tu cliques sur *J'ai déposé ma candidature* — jobot ne peut pas le
+     deviner à ta place.
 5. **Retrouve tes candidatures envoyées** sur une page dédiée, **Candidatures**
    (lien dans la nav, `/candidatures`) — séparée de la recherche pour ne pas
    l'encombrer. Toutes les offres marquées `applied`, les plus récentes en
-   premier.
+   premier, avec le CV et la lettre effectivement envoyés.
 
 **Le mode autonome** (interrupteur « validation humaine » désactivé) envoie
 tout seul les candidatures email dont le score dépasse le seuil choisi.
-Deux garde-fous demeurent : l'interface demande une confirmation globale au
-lancement, et les candidatures par formulaire exigent toujours ta validation
-offre par offre — l'automatisation du formulaire ne se déclenche qu'après
-ton clic, dans un navigateur visible, jamais en arrière-plan.
+L'interface demande une confirmation globale au lancement. Les offres du canal
+`site` t'attendent de toute façon : c'est toi qui déposes.
 
 Le CLI ci-dessous reste disponible pour un usage étape par étape.
 
 ## Le principe
 
 ```
-fetch → filtre → score → [TOI : review] → generate → send / assist
- auto     auto    auto      décision        auto      auto / [TOI]
+fetch → filtre → score → [TOI : review] → generate → send / [TOI : dépôt]
+ auto     auto    auto      décision        auto      email / sur le site
 ```
 
-1. **`fetch`** — récupère les offres depuis France Travail et l'APEC.
+1. **`fetch`** — récupère les offres depuis France Travail, l'APEC et La Bonne
+   Alternance, et écarte les doublons entre sources.
 2. **filtre** — élimine les offres hors périmètre (département, mots-clés,
    type de contrat) avant de payer le moindre appel LLM.
 3. **`score`** — un LLM note chaque offre restante par rapport à ton profil et
    choisit, dans ton CV, les éléments à mettre en avant.
 4. **`review`** — *toi seul* décides quelles offres notées passent à la suite.
-5. **`generate`** — construit un CV PDF adapté à l'offre, à partir de ta
-   sélection validée.
-6. **`send` / `assist`** — envoie l'email (avec confirmation) ou ouvre le
-   formulaire dans un navigateur pour que tu termines toi-même.
+5. **`generate`** — construit le dossier : un CV PDF adapté à l'offre à partir
+   de ta sélection validée, et une lettre de motivation.
+6. **`send` / `kit`** — envoie l'email (avec confirmation), ou te donne les deux
+   PDF et le lien vers l'offre pour que tu déposes toi-même.
 
 Chaque offre progresse dans ces statuts, stockés en base : `new` →
 `filtered_out` *ou* `scored` → `queued` *ou* `skipped` → `applied`.
@@ -83,9 +87,12 @@ Chaque offre progresse dans ces statuts, stockés en base : `new` →
 ## Ce qu'il faut avant de commencer
 
 - **Python 3.11+** et [`uv`](https://docs.astral.sh/uv/)
-- Un compte sur [francetravail.io](https://francetravail.io), avec une
-  souscription à l'API **Offres d'emploi v2** (gratuit). L'APEC, la seconde
-  source, ne demande aucun identifiant.
+- Des identifiants de sources, tous gratuits, et tous facultatifs pris un par
+  un — l'APEC n'en demande aucun, donc jobot tourne sans compte nulle part :
+  - [francetravail.io](https://francetravail.io), avec une souscription à
+    l'API **Offres d'emploi v2**
+  - [api.apprentissage.beta.gouv.fr](https://api.apprentissage.beta.gouv.fr)
+    pour La Bonne Alternance (alternance uniquement)
 - Un LLM au choix — un modèle local suffit, aucune clé n'est obligatoire
   (voir *Choix du LLM* plus bas)
 - *Optionnel* : des identifiants SMTP si tu veux l'envoi automatique par email
@@ -101,10 +108,14 @@ cp .env.example .env
 Édite `.env` :
 1. `FT_CLIENT_ID` / `FT_CLIENT_SECRET` — récupérés sur francetravail.io
    (Mon espace > Mes applications)
-2. `JOBOT_LLM_*` — voir *Choix du LLM*
-3. `JOBOT_DEPARTEMENTS`, `JOBOT_MOTS_CLES`, etc. — tes critères de recherche
-4. `JOBOT_SOURCES` — sources interrogées, par défaut `francetravail,apec`.
-   Mets `apec` seul pour démarrer sans compte francetravail.io.
+2. `LBA_API_KEY` — jeton généré sur api.apprentissage.beta.gouv.fr
+3. `JOBOT_LLM_*` — voir *Choix du LLM*
+4. `JOBOT_DEPARTEMENTS`, `JOBOT_MOTS_CLES`, etc. — tes critères de recherche
+5. `JOBOT_SOURCES` — sources interrogées, par défaut les trois. Mets `apec`
+   seul pour démarrer sans créer de compte nulle part.
+
+Tout cela se règle aussi depuis l'écran **Réglages** de l'interface, sans
+toucher au terminal.
 
 Puis crée ton CV maître :
 
@@ -117,7 +128,8 @@ uv run jobot cv check                # valider et lister les id disponibles
 **Relis toujours le résultat d'un `cv import`** — c'est une extraction
 automatique, pas un rendu garanti fidèle.
 
-Enfin, installe le navigateur (nécessaire pour le PDF et le mode assisté) :
+Enfin, installe le navigateur (Playwright ne sert plus qu'au rendu PDF du CV
+et de la lettre) :
 
 ```bash
 uv run playwright install chromium   # ~150 Mo, une seule fois
@@ -143,12 +155,13 @@ uv run jobot review               # TOI : garder ou écarter chaque offre notée
 uv run jobot generate <id>        # CV adapté -> out/<id>.html + out/<id>.pdf
 uv run jobot send                 # SIMULATION des envois email (rien ne part)
 uv run jobot send --envoyer       # envoi réel, avec confirmation listant les destinataires
-uv run jobot assist <id>          # canal form : ouvre le navigateur, tu termines toi-même
+uv run jobot kit <id>             # dossier complet : CV + lettre + lien pour postuler
+uv run jobot postule <id>         # marque une offre déposée à la main
 ```
 
-`review`, `send` et `assist` s'appuient sur le canal de candidature de
-chaque offre (voir plus bas) : `send` ne traite que le canal `email`,
-`assist` que le canal `form`.
+`review`, `send` et `kit` s'appuient sur le canal de candidature de chaque
+offre (voir plus bas) : `send` ne traite que le canal `email`, `kit` prépare
+le dossier de n'importe quelle offre scorée.
 
 ## Le CV maître
 
@@ -222,42 +235,51 @@ généré par le LLM** — une phrase inventée dans une lettre de motivation
 partirait chez un vrai recruteur. Édite ce fichier pour personnaliser le
 message.
 
-**Canal `form`** — deux modes, au choix dans l'UI :
+**Canal `site`** — jobot prépare le dossier et s'arrête là. L'écran *Ouvrir
+le dossier* donne le CV adapté, la lettre, et le lien direct vers la page de
+candidature ; tu déposes toi-même, puis tu confirmes pour que l'offre passe en
+`applied`.
 
-- **Automatique** (par défaut) : après ta validation de l'offre, Playwright
-  ouvre un navigateur visible à profil persistant (tes sessions restent
-  connectées d'une candidature à l'autre), ferme le bandeau cookies, remplit
-  les champs qu'il reconnaît (nom, prénom, email, téléphone, message — issu du
-  template email, jamais du LLM), joint le CV PDF et clique sur envoyer. Le
-  remplissage est heuristique : sur un captcha ou un formulaire non standard,
-  il te laisse la main en te disant pourquoi. Rien ne se passe en
-  arrière-plan : tu vois tout, tu peux corriger avant que ça parte.
-- **Manuel** (`jobot assist <id>` en CLI, ou toggle désactivé dans l'UI) :
-  le navigateur s'ouvre sur l'offre avec les informations à recopier, tu
-  remplis et tu cliques toi-même.
+C'est un renoncement assumé. jobot a remplacé les formulaires par Playwright
+pendant un temps : détection heuristique des champs, upload du CV, clic sur
+envoyer, avec reprise après les murs d'authentification. Chaque plateforme de
+recrutement ayant son propre formulaire, ses propres libellés et son propre
+captcha, l'heuristique ne tenait jamais bien longtemps sur plus de quelques
+sites. Le temps rendu par cet abandon va à ce qui passe à l'échelle, lui :
+brancher plus de sources, et soigner le dossier.
 
-Dans les deux cas, à la fermeture du navigateur, jobot te demande si la
-candidature est partie pour mettre à jour le statut — la détection
-automatique du succès n'étant jamais fiable, c'est toi qui confirmes.
+## La lettre de motivation
 
-### Les sites qui exigent un compte
+C'est le seul endroit où un LLM écrit une prose qui finira sous les yeux d'un
+recruteur. Le garde-fou du CV — le modèle choisit parmi des `id` existants,
+donc il ne peut rien inventer — ne se transpose pas à du texte libre. Trois
+contraintes le remplacent (`letter.py`) :
 
-Certaines plateformes (France Travail au premier chef) ne montrent leur
-formulaire qu'à un utilisateur connecté. jobot **n'abandonne pas** dans ce
-cas : il détecte le mur d'authentification, met la candidature en pause et
-te l'annonce dans l'interface. Tu te connectes dans la fenêtre déjà ouverte,
-tu cliques sur *J'ai fini, reprends*, et le remplissage repart où il s'était
-arrêté.
+1. **Matière première réduite.** Le modèle ne reçoit pas le CV maître entier,
+   mais uniquement les éléments que le scoring a retenus pour cette offre, plus
+   l'identité et la formation. Il recombine des faits, il n'en découvre pas.
+2. **Structure imposée.** Sa sortie n'est pas une lettre mais trois paragraphes
+   courts (accroche, adéquation, motivation). L'en-tête, l'objet, la formule
+   d'appel, la formule de politesse et la signature viennent du template
+   `templates/letter.html.jinja` — jamais du modèle.
+3. **Relecture obligatoire, et gratuite.** Sur le canal `site`, c'est toi qui
+   déposes le fichier : tu lis donc la lettre par construction. `suspect_terms()`
+   te signale en plus les noms propres et les affirmations chiffrées absents à
+   la fois de ton CV et de l'annonce — un employeur, un outil ou une durée
+   inventés s'y logent en pratique.
 
-jobot ne stocke aucun mot de passe : c'est le profil Chrome persistant
-(`chrome-profile/`) qui conserve la session, exactement comme ton navigateur
-habituel. Comme le mur est par site et non par offre, une connexion vaut pour
-toutes les offres de la plateforme et pour les sessions suivantes.
+Ce troisième point est la raison pour laquelle générer une lettre est devenu
+acceptable : tant que jobot envoyait tout seul, une phrase inventée partait
+sans que personne ne la lise. Ce n'est plus le cas.
 
-La section **Connexions aux plateformes** de l'interface liste les sites
-présents dans tes offres en attente, avec le nombre d'offres concernées et un
-bouton pour t'y connecter d'avance — de quoi préparer une série de
-candidatures sans interruption.
+Le détecteur reste volontairement conservateur : un mot capitalisé en début de
+phrase est ignoré, parce que le français y met surtout des verbes. Il indique
+où regarder, il ne valide rien — une lettre sans terme signalé peut rester
+fausse.
+
+Le bouton **Réécrire la lettre** relance la génération autant de fois que tu
+veux ; le corps de l'email de candidature, lui, reste un template fixe
+(`templates/email.txt.jinja`), jamais généré.
 
 ## Choix du LLM
 
@@ -289,13 +311,50 @@ maître*) reste le garde-fou, quel que soit le modèle.
 ## Les sources d'offres
 
 `JOBOT_SOURCES` choisit lesquelles sont interrogées, dans l'ordre. Chacune est
-appelée une fois par combinaison département × mot-clé, et la dédup se fait
-ensuite sur la clé `source:id`.
+appelée une fois par combinaison département × mot-clé.
 
 | Source | Identifiants | Ce qu'elle apporte |
 |---|---|---|
-| `francetravail` | `FT_CLIENT_ID` / `FT_CLIENT_SECRET` | API officielle, annonce complète, adresse de contact quand elle existe |
+| `francetravail` | `FT_CLIENT_ID` / `FT_CLIENT_SECRET` (gratuits) | API officielle, annonce complète, adresse de contact quand elle existe |
 | `apec` | aucun | offres cadres absentes de France Travail |
+| `labonnealternance` | `LBA_API_KEY` (gratuite) | alternance uniquement — offres du service public de l'apprentissage |
+
+Ajouter des sources est désormais l'axe principal de jobot : c'est le côté
+*lecture* du problème, et il passe à l'échelle là où l'automatisation du dépôt
+ne le faisait pas.
+
+### La dédup entre sources
+
+Une même annonce ressort souvent sur plusieurs sites — France Travail republie
+chez La Bonne Alternance, et réciproquement. La clé primaire `source:id` ne les
+rapproche pas. `Offer.dedup_key` normalise l'intitulé et l'employeur (accents,
+ponctuation, formes juridiques, mentions `H/F`) pour les reconnaître : à
+l'insertion, une offre dont le jumeau est déjà en base est ignorée. Chaque
+doublon évité, c'est un scoring, un CV et une lettre de moins — donc deux
+appels LLM économisés.
+
+Sans employeur, la clé retombe sur l'id : deux annonces anonymes au même
+intitulé sont trop souvent deux vraies offres distinctes pour être confondues.
+
+### La Bonne Alternance
+
+L'API est gratuite mais plus anonyme : il faut un compte sur
+[api.apprentissage.beta.gouv.fr](https://api.apprentissage.beta.gouv.fr) et un
+jeton généré depuis ton profil, passé en `Authorization: Bearer`. Trois choses
+à savoir :
+
+- Elle ne renvoie que de l'alternance : le pipeline ne l'interroge pas quand
+  la recherche porte sur un autre type de contrat, plutôt que de payer des
+  requêtes pour rien.
+- La réponse sépare `jobs` (de vraies annonces) et `recruiters` (des
+  entreprises jugées susceptibles de recruter, sans annonce derrière). Seules
+  les `jobs` sont retenues : les secondes n'ont ni intitulé ni description, et
+  rempliraient la base d'offres fantômes que le scoring ne saurait pas évaluer.
+- Elle ne cherche pas en plein texte, seulement par code ROME. jobot cherche
+  par intitulé libre : le tri sur les mots-clés est donc fait localement, après
+  la requête.
+
+### L'APEC
 
 **L'APEC n'a pas d'API publique documentée** : `sources/apec.py` utilise les
 endpoints du site lui-même. Trois conséquences à connaître :
@@ -307,7 +366,7 @@ endpoints du site lui-même. Trois conséquences à connaître :
   navigateur. **jobot ne stocke donc que l'extrait de ~280 caractères renvoyé
   par la recherche.** Le scoring travaille sur ce résumé et le sait (il lui est
   précisé de ne pas pénaliser l'offre pour ce qui manque) ; le texte complet
-  reste à un clic, dans le navigateur ouvert par `jobot assist`.
+  reste à un clic, sur la page de l'offre.
 - Comme la description est partielle, le filtre par mots-clés n'est pas
   réappliqué localement à ces offres — l'APEC a déjà cherché, elle, dans le
   texte entier. Les rejeter sur un extrait tronqué écarterait des offres
@@ -325,26 +384,24 @@ l'API. Deux pièges de l'API France Travail sont traités ici :
   venue d'un partenaire (le cas le plus fréquent), ce champ mène à la fiche
   sur `candidat.francetravail.fr`, dont le bouton « Postuler » ne fait que
   rediriger vers le site partenaire. `origineOffre.partenaires[].url` donne ce
-  lien final directement — c'est lui que jobot suit, ce qui amène
-  l'automatisation sur le vrai formulaire au lieu d'une page intermédiaire.
+  lien final directement — c'est lui que jobot suit, pour t'envoyer sur le vrai
+  formulaire plutôt que sur une page intermédiaire.
 - **`contact.courriel` ne contient pas toujours une adresse.** France Travail
   y met parfois une phrase (« Pour postuler, utiliser le lien suivant :
   https://… »). Router ces offres sur le canal email ferait tenter un envoi
   SMTP vers un destinataire absurde : `clean_email()` ne garde que ce qui est
-  réellement une adresse, le reste bascule sur le canal formulaire.
+  réellement une adresse, le reste bascule sur le canal `site`.
 
-| Canal | Détecté par | Automatisation |
+| Canal | Détecté par | Ce qui se passe |
 |---|---|---|
-| `email` | `contact.courriel`, si c'est bien une adresse | quasi complète — SMTP + PDF joint, confirmation avant envoi |
-| `form` | `contact.urlPostulation`, l'URL du partenaire, ou `origineOffre.urlOrigine` | automatisée après validation par offre — formulaire rempli et soumis dans un navigateur visible (ou mode manuel au choix) |
+| `email` | `contact.courriel`, si c'est bien une adresse | envoi depuis jobot — SMTP, CV et lettre joints, confirmation avant envoi |
+| `site` | `contact.urlPostulation`, l'URL du partenaire, ou `origineOffre.urlOrigine` | dossier préparé, lien vers l'offre, dépôt et confirmation par toi |
 | `unknown` | aucun des deux | écartée par défaut |
 
-L'APEC ne publie jamais d'adresse de contact : **toutes ses offres arrivent sur
-le canal `form`** et passent donc par `jobot assist`.
+Ni l'APEC ni La Bonne Alternance ne publient d'adresse de contact : **toutes
+leurs offres arrivent sur le canal `site`**.
 
-`jobot stats` donne la répartition : c'est elle qui indique combien de
-candidatures peuvent réellement partir sans intervention manuelle sur le
-formulaire.
+`jobot stats` donne la répartition.
 
 ## Structure du code
 
@@ -353,22 +410,22 @@ Dans l'ordre où les données y circulent :
 | Fichier | Rôle |
 |---|---|
 | `config.py` | Config centralisée (`.env` → objet `settings`), messages d'erreur pour les identifiants manquants |
-| `models.py` | `Offer`, `Channel`, `Status` — le schéma d'une offre et son cycle de vie |
+| `models.py` | `Offer`, `Channel`, `Status` — schéma d'une offre, cycle de vie, clés de dédup |
 | `pipeline.py` | Orchestration du pipeline complet (fetch → filtre → score → génération → envoi), presets domaines/départements, état d'exécution partagé avec l'UI |
-| `web.py` | API FastAPI locale de `jobot ui` (recherche, validation, assistant, import CV) |
-| `webui/` | L'interface web, design Electric Volt : `index.html` (recherche + validation), `candidatures.html` (candidatures envoyées), `style.css` partagé |
+| `web.py` | API FastAPI locale de `jobot ui` (recherche, validation, dossiers, import CV) |
+| `webui/` | L'interface web, design Electric Volt : `index.html` (recherche + dossiers), `candidatures.html` (candidatures envoyées), `style.css` partagé |
 | `sources/francetravail.py` | Client OAuth2 + pagination pour l'API France Travail |
 | `sources/apec.py` | Client de la recherche apec.fr (pas d'API publique — voir *Les sources d'offres*) |
+| `sources/labonnealternance.py` | Client de l'API du service public de l'apprentissage |
 | `filters.py` | Filtrage à règles, sans appel LLM |
-| `db.py` | Toute l'écriture SQLite (dédup, upsert, transitions de statut) |
+| `db.py` | Toute l'écriture SQLite (dédup, upsert, transitions de statut, migrations) |
 | `cv.py` | Modèles du CV maître + `selectable_ids()`, le garde-fou anti-hallucination |
 | `llm/` | Abstraction fournisseur : `base.py` (contrat), `gemini.py`, `openai_compat.py` |
 | `scoring.py` | Appelle le LLM, valide sa sélection d'`id` contre `selectable_ids()` |
+| `letter.py` | Rédige la lettre à partir de la seule sélection du scoring, et signale les termes suspects |
 | `render.py` | Filtre le CV selon la sélection, rend le HTML (Jinja2) puis le PDF (Playwright) |
 | `mailer.py` | Compose et envoie l'email de candidature |
-| `assist.py` | Ouvre le navigateur pour le canal `form` (mode manuel) |
-| `autofill.py` | Remplit et soumet les formulaires de candidature (mode automatique, navigateur visible) |
-| `templates/` | `cv.html.jinja` (mise en page du CV), `email.txt.jinja` (texte de l'email — jamais généré par le LLM) |
+| `templates/` | `cv.html.jinja`, `letter.html.jinja` (mises en page), `email.txt.jinja` (texte de l'email — jamais généré par le LLM) |
 | `cli.py` | Toutes les commandes `jobot ...`, assemble les modules ci-dessus |
 
 ## Notes techniques
@@ -379,18 +436,30 @@ Dans l'ordre où les données y circulent :
 - **Pagination APEC** : `range` est plafonné à 100 — au-delà l'API retombe
   silencieusement sur 20. Les résultats étant triés par date décroissante, le
   filtre `--jours` s'arrête à la première offre trop ancienne.
-- **Croisement département × mot-clé** : aucune des deux API ne fait de OU sur
+- **Quota La Bonne Alternance** : 60 appels par minute et par jeton.
+- **Croisement département × mot-clé** : aucune de ces API ne fait de OU sur
   les mots-clés, donc jobot émet une requête par combinaison et dédoublonne
   côté client.
-- **Dédup** : clé primaire `source:id`. Un `content_hash` détecte les offres
-  réécrites par l'employeur et les repasse en `new` pour un nouveau scoring.
+- **Dédup** : clé primaire `source:id`, plus `dedup_key` entre sources (voir
+  *Les sources d'offres*). Un `content_hash` détecte les offres réécrites par
+  l'employeur et les repasse en `new` pour un nouveau scoring — la lettre est
+  alors effacée, puisqu'elle décrivait l'ancienne version de l'annonce.
 - **Filtrage avant LLM** : chaque offre écartée par `filters.py` est un appel
   LLM économisé.
+- **`user_id`** : la table `offers` porte une colonne `user_id`, à `local` pour
+  tout le monde tant que jobot tourne pour un seul candidat. Elle existe déjà
+  pour qu'un passage en multi-utilisateur soit une migration de données plutôt
+  qu'une réécriture des requêtes.
 
 ## Limites connues et pistes
 
 - Les offres APEC n'ont qu'une description tronquée (voir *Les sources
   d'offres*), ce qui rend leur scoring moins fin que celui des offres France
   Travail.
+- La dédup inter-sources compare intitulé et employeur normalisés : deux
+  annonces réellement distinctes au même intitulé chez le même employeur
+  (deux villes, par exemple) seront confondues.
 - Pas de relance automatique après candidature.
-
+- Prochaines sources naturelles : les job boards ATS (Greenhouse, Lever,
+  Ashby, SmartRecruiters, Workable, Recruitee) publient tous un JSON public
+  sans authentification — il ne manque qu'une liste d'entreprises à parcourir.

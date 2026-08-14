@@ -80,6 +80,10 @@ async function load() {
       <span class="badge applied">envoyée</span>
       <span class="t">${esc(o.title)}</span>
       <span class="c">${esc(o.company || "—")}</span>
+      <span class="links">
+        <a href="/api/offers/${encodeURIComponent(o.id)}/cv.pdf" target="_blank">CV</a>
+        ${o.letter_ready ? `<a href="/api/offers/${encodeURIComponent(o.id)}/lettre.pdf" target="_blank">Lettre</a>` : ""}
+      </span>
       <span class="d">${o.applied_at ? new Date(o.applied_at).toLocaleDateString("fr-FR") : ""}</span>
     </div>`).join("");
 }

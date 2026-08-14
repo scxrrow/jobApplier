@@ -19,8 +19,12 @@ class Settings(BaseSettings):
     ft_client_id: str = ""
     ft_client_secret: str = ""
 
+    # La Bonne Alternance : gratuit, mais un jeton est requis depuis la v1
+    # (compte sur api.apprentissage.beta.gouv.fr).
+    lba_api_key: str = ""
+
     # Sources d'offres interrogees par `jobot fetch`, dans l'ordre.
-    jobot_sources: str = "francetravail,apec"
+    jobot_sources: str = "francetravail,apec,labonnealternance"
 
     # LLM : n'importe quelle API OpenAI-compatible (LM Studio, Ollama, OpenAI,
     # OpenRouter...) ou Gemini natif. Voir llm/__init__.py pour les raccourcis.
@@ -47,7 +51,6 @@ class Settings(BaseSettings):
     db_path: Path = ROOT / "jobot.db"
     cv_path: Path = ROOT / "data" / "master-cv.json"
     out_dir: Path = ROOT / "out"
-    chrome_profile: Path = ROOT / "chrome-profile"
 
     @property
     def sources(self) -> list[str]:
@@ -72,6 +75,15 @@ class Settings(BaseSettings):
                 "  1. Cree un compte sur https://francetravail.io\n"
                 "  2. Souscris a l'API 'Offres d'emploi v2'\n"
                 "  3. Copie .env.example vers .env et colle tes identifiants"
+            )
+
+    def require_lba_key(self) -> None:
+        if not self.lba_api_key:
+            raise RuntimeError(
+                "LBA_API_KEY absente (source labonnealternance).\n"
+                "  1. Cree un compte sur https://api.apprentissage.beta.gouv.fr\n"
+                "  2. Genere un jeton depuis ton profil\n"
+                "  3. Colle-le dans .env, ou dans l'ecran Reglages de l'interface"
             )
 
     def require_smtp(self) -> None:

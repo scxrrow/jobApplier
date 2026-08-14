@@ -98,27 +98,15 @@
           <div class="toggle-text">
             <b>Validation humaine avant envoi</b>
             <small>
-              Activée : la recherche prépare tout (offres, scores, CV adaptés) et
-              chaque candidature attend ta confirmation ici.
+              Activée : la recherche prépare tout (offres, scores, CV adaptés,
+              lettres) et chaque candidature attend ta confirmation ici.
               Désactivée : les candidatures par email partent toutes seules dès que
-              le score dépasse le seuil — les formulaires web, eux, demanderont
-              toujours ta validation par offre.
+              le score dépasse le seuil. Les offres à déposer sur un site
+              t'attendront de toute façon — c'est toi qui déposes.
             </small>
             <span class="autonomy-warning" id="autonomy-warning">
               Mode autonome : les emails de candidature partiront réellement, sans confirmation.
             </span>
-          </div>
-        </div>
-        <div class="toggle-row">
-          <button class="toggle on" id="form-auto-toggle" aria-label="Formulaires automatiques"></button>
-          <div class="toggle-text">
-            <b>Formulaires : candidature automatique</b>
-            <small>
-              Activée : après ta validation d'une offre « formulaire », le navigateur
-              s'ouvre, remplit les champs, joint le CV et clique sur envoyer — sous
-              tes yeux, tu peux corriger ou reprendre la main à tout moment.
-              Désactivée : le navigateur s'ouvre et tu remplis toi-même.
-            </small>
           </div>
         </div>
       </div>
@@ -138,7 +126,7 @@
       <div class="step" data-step="fetch"><div class="bullet"></div><div class="name">Récupération</div></div>
       <div class="step" data-step="filtre"><div class="bullet"></div><div class="name">Filtrage</div></div>
       <div class="step" data-step="score"><div class="bullet"></div><div class="name">Scoring</div></div>
-      <div class="step" data-step="generation"><div class="bullet"></div><div class="name">CV adaptés</div></div>
+      <div class="step" data-step="generation"><div class="bullet"></div><div class="name">CV + lettres</div></div>
       <div class="step" data-step="envoi"><div class="bullet"></div><div class="name">Envoi</div></div>
     </div>
 
@@ -155,27 +143,14 @@
 <!-- ============ Validation ============ -->
 <section id="validate-section" class="hidden">
   <div class="container">
-    <h2 class="section-title">Candidatures à valider</h2>
+    <h2 class="section-title">Dossiers prêts</h2>
     <p class="subtitle">
-      Dernière étape humaine : vérifie le CV adapté, puis valide ou écarte.
-      Après ta validation, les offres « formulaire » sont remplies et envoyées
-      dans un navigateur visible — tu peux corriger ou reprendre la main à tout moment.
+      Pour chaque offre, un CV adapté et une lettre de motivation t'attendent.
+      Les offres avec une adresse de contact partent par email d'ici ; pour les
+      autres, récupère les deux PDF et dépose-les sur le site de l'offre.
     </p>
     <div class="offer-list" id="offer-list"></div>
-    <div class="empty hidden" id="offer-empty">Aucune candidature en attente. Lance une recherche ci-dessus.</div>
-  </div>
-</section>
-
-<!-- ============ Connexions ============ -->
-<section id="logins-section" class="hidden">
-  <div class="container">
-    <h2 class="section-title">Connexions aux plateformes</h2>
-    <p class="subtitle">
-      Certains sites exigent un compte pour postuler. La connexion vaut pour toutes
-      les offres du site et reste valable d'une session à l'autre : connecte-toi une
-      fois ici, et les candidatures suivantes ne seront plus interrompues.
-    </p>
-    <div class="applied-rows" id="logins-rows"></div>
+    <div class="empty hidden" id="offer-empty">Aucun dossier en attente. Lance une recherche ci-dessus.</div>
   </div>
 </section>
 
@@ -198,25 +173,56 @@
   </div>
 </div>
 
-<!-- ============ Modale : candidature formulaire ============ -->
-<div class="overlay" id="assist-overlay">
+<!-- ============ Modale : dossier de candidature ============ -->
+<div class="overlay" id="kit-overlay">
   <div class="modal">
-    <h2 id="assist-title">Candidature automatique</h2>
-    <p class="sub" id="assist-sub"></p>
-    <div class="kv hidden" id="assist-report"></div>
-    <div class="kv" id="assist-kv"></div>
-    <div class="row hidden" style="margin-top:32px" id="assist-login-row">
-      <span class="subtitle" style="font-size:14px; margin-right:auto; color:var(--warning)" id="assist-login-text"></span>
-      <button class="btn" id="assist-resume">J'ai fini, reprends</button>
+    <h2>Ton dossier de candidature</h2>
+    <p class="sub" id="kit-offer-title"></p>
+
+    <div class="kit-steps">
+      <div class="kit-step">
+        <span class="n">1</span>
+        <div>
+          <b>Récupère les deux pièces</b>
+          <div class="row" style="margin-top:12px; justify-content:flex-start">
+            <a class="btn tertiary" id="kit-cv" target="_blank">CV adapté (PDF)</a>
+            <a class="btn tertiary" id="kit-letter" target="_blank">Lettre (PDF)</a>
+          </div>
+        </div>
+      </div>
+      <div class="kit-step">
+        <span class="n">2</span>
+        <div>
+          <b>Dépose-les sur le site de l'offre</b>
+          <small>
+            Le lien ouvre directement la page de candidature. Crée un compte si
+            le site l'exige, puis joins les deux PDF.
+          </small>
+          <div class="row" style="margin-top:12px; justify-content:flex-start">
+            <a class="btn" id="kit-apply" target="_blank" rel="noopener">Ouvrir l'offre</a>
+          </div>
+        </div>
+      </div>
+      <div class="kit-step">
+        <span class="n">3</span>
+        <div>
+          <b>Reviens le dire à jobot</b>
+          <small>
+            jobot ne peut pas savoir si ta candidature est partie : c'est toi qui
+            confirmes, pour la retrouver ensuite dans « Candidatures ».
+          </small>
+        </div>
+      </div>
     </div>
-    <div class="row" style="margin-top:32px" id="assist-wait-row">
-      <span class="subtitle" style="font-size:13px; margin-right:auto" id="assist-wait-text">En attente de la fermeture du navigateur…</span>
-      <a class="btn tertiary" id="assist-pdf" target="_blank">Voir le CV</a>
-    </div>
-    <div class="row hidden" style="margin-top:32px" id="assist-done-row">
-      <span class="subtitle" style="font-size:14px; margin-right:auto">Candidature envoyée ?</span>
-      <button class="btn secondary" id="assist-no">Pas encore</button>
-      <button class="btn" id="assist-yes">Oui, envoyée</button>
+
+    <label class="label" style="margin-top:32px">Lettre de motivation — relis-la avant de l'envoyer</label>
+    <div class="mailbody" id="kit-letter-text"></div>
+    <p class="note hidden" id="kit-flagged"></p>
+
+    <div class="row" style="margin-top:32px">
+      <button class="btn tertiary" id="kit-regen">Réécrire la lettre</button>
+      <button class="btn secondary" data-close>Fermer</button>
+      <button class="btn" id="kit-applied">J'ai déposé ma candidature</button>
     </div>
   </div>
 </div>
@@ -245,6 +251,20 @@
     <div class="form-grid" style="grid-template-columns:1fr; margin-bottom:32px">
       <input type="text" id="set-llm-key" placeholder="Clé API — laisse vide pour ne pas la changer">
     </div>
+
+    <label class="label">Sources d'offres — identifiants des API qui en demandent</label>
+    <div class="form-grid" style="grid-template-columns:1fr 1fr; margin-bottom:16px">
+      <input type="text" id="set-ft-id" placeholder="France Travail — client ID">
+      <input type="text" id="set-ft-secret" placeholder="France Travail — client secret">
+    </div>
+    <div class="form-grid" style="grid-template-columns:1fr; margin-bottom:16px">
+      <input type="text" id="set-lba-key" placeholder="La Bonne Alternance — jeton d'API">
+    </div>
+    <p class="subtitle" style="font-size:13px; margin-bottom:32px">
+      Gratuits tous les deux : France Travail sur
+      <b>francetravail.io</b> (souscris à « Offres d'emploi v2 »), La Bonne
+      Alternance sur <b>api.apprentissage.beta.gouv.fr</b>. L'APEC n'en demande aucun.
+    </p>
 
     <label class="label">SMTP — envoi automatique des candidatures par email</label>
     <div class="form-grid" style="grid-template-columns:2fr 1fr; margin-bottom:16px">
@@ -326,6 +346,14 @@ const api = async (path, opts = {}) => {
   return resp.json();
 };
 
+// Nom affiché de chaque source. Une source absente de cette table s'affiche
+// sous son identifiant : mieux vaut un libellé brut qu'un mauvais libellé.
+const SOURCE_LABELS = {
+  francetravail: "France Travail",
+  apec: "APEC",
+  labonnealternance: "La Bonne Alternance",
+};
+
 const state = {
   meta: null,
   deps: new Set(),
@@ -333,13 +361,10 @@ const state = {
   contrat: "alternance",
   sources: new Set(),
   validation: true,
-  formAuto: true,
   running: false,
   lastLogCount: -1,
-  assistOffer: null,
-  assistMode: "auto",
+  kitOffer: null,
   applyOffer: null,
-  loginPending: false,
 };
 
 function toast(msg, kind = "info") {
@@ -429,11 +454,6 @@ function setValidation(on) {
   $("autonomy-warning").classList.toggle("visible", !on);
 }
 
-function setFormAuto(on) {
-  state.formAuto = on;
-  $("form-auto-toggle").classList.toggle("on", on);
-}
-
 function renderPosteChips() {
   const box = $("poste-chips");
   box.innerHTML = "";
@@ -486,7 +506,6 @@ function initForm() {
   $("jours").value = String(d.jours || 7);
   $("score-min").value = String(d.score_min ?? 60);
   setValidation(d.validation_humaine !== false);
-  setFormAuto(d.form_auto !== false);
 
   const contratSel = new Set([state.contrat]);
   chipRow("contract-chips", m.contrats, contratSel, {
@@ -494,7 +513,7 @@ function initForm() {
     onchange: () => { state.contrat = [...contratSel][0]; },
   });
   chipRow("source-chips",
-    m.sources.map((s) => ({ id: s, label: s === "francetravail" ? "France Travail" : "APEC" })),
+    m.sources.map((s) => ({ id: s, label: SOURCE_LABELS[s] || s })),
     state.sources);
   renderDepChips();
   setupDepPicker();
@@ -502,7 +521,6 @@ function initForm() {
   setupPosteInput();
 
   $("validation-toggle").onclick = () => setValidation(!state.validation);
-  $("form-auto-toggle").onclick = () => setFormAuto(!state.formAuto);
   $("launch-btn").onclick = launch;
   $("cancel-btn").onclick = () => api("/api/cancel", { method: "POST" }).catch((e) => toast(e.message, "error"));
 }
@@ -518,7 +536,6 @@ function buildParams() {
     jours: parseInt($("jours").value, 10),
     sources: [...state.sources],
     validation_humaine: state.validation,
-    form_auto: state.formAuto,
     score_min: Math.max(0, Math.min(100, parseInt($("score-min").value, 10) || 60)),
   };
 }
@@ -608,7 +625,6 @@ async function poll(fast = false) {
     state.running = snap.run.running;
     renderRun(snap.run);
     renderStats(snap.stats);
-    handleAssistState(snap.assist);
     if (wasRunning && !snap.run.running) {
       await refreshOffers();
       toast(snap.run.error ? "Recherche arrêtée : " + snap.run.error : "Recherche terminée.",
@@ -626,16 +642,14 @@ function offerCard(o) {
   const low = (o.score ?? 0) < (state.meta.defaults.score_min ?? 60);
   const badge = o.channel === "email"
     ? '<span class="badge email">Email</span>'
-    : o.channel === "form"
-      ? '<span class="badge form">Formulaire</span>'
+    : o.channel === "site"
+      ? '<span class="badge form">Sur le site</span>'
       : '<span class="badge">?</span>';
-  const queuedNote = o.status === "queued" && o.channel === "form"
-    ? '<span class="badge form">action requise</span>' : "";
+  const letterNote = o.letter_ready ? "" : '<span class="badge">lettre à venir</span>';
 
-  const formLabel = state.formAuto ? "Valider &amp; postuler" : "Ouvrir le formulaire";
   const primary = o.channel === "email"
     ? `<button class="btn" data-act="apply" data-id="${esc(o.id)}">Valider &amp; envoyer</button>`
-    : `<button class="btn" data-act="assist" data-id="${esc(o.id)}">${formLabel}</button>`;
+    : `<button class="btn" data-act="kit" data-id="${esc(o.id)}">Ouvrir le dossier</button>`;
 
   return `<div class="card offer" data-id="${esc(o.id)}">
     <div class="score">
@@ -643,7 +657,7 @@ function offerCard(o) {
       <div class="of">/ 100</div>
     </div>
     <div class="body">
-      <h3>${esc(o.title)}${badge}${queuedNote}</h3>
+      <h3>${esc(o.title)}${badge}${letterNote}</h3>
       <div class="meta-line">${esc(o.company || "—")} · ${esc(o.location || "—")} · ${esc(o.contract || "—")}</div>
       ${o.score_reason ? `<div class="reason">${esc(o.score_reason)}</div>` : ""}
       <div class="actions">
@@ -651,6 +665,7 @@ function offerCard(o) {
         <button class="btn secondary" data-act="skip" data-id="${esc(o.id)}">Écarter</button>
         <div class="links">
           <a href="/api/offers/${encodeURIComponent(o.id)}/cv.pdf" target="_blank">CV adapté (PDF)</a>
+          ${o.letter_ready ? `<a href="/api/offers/${encodeURIComponent(o.id)}/lettre.pdf" target="_blank">Lettre (PDF)</a>` : ""}
           ${o.url ? `<a href="${esc(o.url)}" target="_blank" rel="noopener">Offre originale</a>` : ""}
           <a href="#" data-act="toggle-desc" data-id="${esc(o.id)}">Description</a>
         </div>
@@ -667,12 +682,10 @@ async function refreshOffers() {
   $("offer-list").innerHTML = pending.map(offerCard).join("");
   $("offer-empty").classList.toggle("hidden", pending.length > 0);
 
-  refreshLogins();
-
   for (const btn of document.querySelectorAll("[data-act]")) {
     const id = btn.dataset.id;
     if (btn.dataset.act === "apply") btn.onclick = () => openApplyModal(id);
-    if (btn.dataset.act === "assist") btn.onclick = () => startAssist(id);
+    if (btn.dataset.act === "kit") btn.onclick = () => openKit(id);
     if (btn.dataset.act === "skip") btn.onclick = () => skipOffer(id);
     if (btn.dataset.act === "toggle-desc") btn.onclick = (e) => { e.preventDefault(); toggleDesc(id); };
   }
@@ -740,144 +753,89 @@ async function confirmApply() {
   }
 }
 
-/* ---- Assistant formulaire ---- */
+/* ---- Dossier de candidature (canal `site`) ---- */
 
-const FIELD_LABELS = { prenom: "Prénom", nom: "Nom", email: "Email", telephone: "Téléphone", message: "Message" };
+/* jobot ne remplit aucun formulaire de candidature : chaque plateforme de
+   recrutement a le sien, et aucune heuristique ne tenait sur l'ensemble. Cette
+   modale prepare les pieces et ouvre l'offre ; le depot et sa confirmation
+   restent humains. */
 
-async function startAssist(id) {
+function renderKit(data) {
+  const id = state.kitOffer;
+  $("kit-cv").href = "/api/offers/" + encodeURIComponent(id) + "/cv.pdf";
+
+  const hasLetter = Boolean(data.letter);
+  $("kit-letter").classList.toggle("hidden", !hasLetter);
+  if (hasLetter) $("kit-letter").href = data.letter_url;
+  $("kit-letter-text").textContent = hasLetter
+    ? data.letter
+    : "Aucune lettre pour cette offre — clique sur « Réécrire la lettre » pour en générer une.";
+
+  const apply = $("kit-apply");
+  if (data.apply_link) {
+    apply.href = data.apply_link;
+    apply.classList.remove("hidden");
+  } else {
+    apply.classList.add("hidden");
+  }
+
+  const flagged = $("kit-flagged");
+  if (data.flagged_terms && data.flagged_terms.length) {
+    flagged.innerHTML =
+      "À vérifier — ces termes de la lettre ne figurent ni dans ton CV maître, " +
+      "ni dans l'annonce : <b>" + esc(data.flagged_terms.slice(0, 12).join(", ")) + "</b>. " +
+      "Un modèle peut inventer une durée, un outil ou un employeur : relis avant d'envoyer.";
+    flagged.classList.remove("hidden");
+  } else {
+    flagged.classList.add("hidden");
+  }
+}
+
+async function openKit(id) {
   try {
-    const res = await api("/api/offers/" + encodeURIComponent(id) + "/assist", {
-      method: "POST",
-      body: JSON.stringify({ auto: state.formAuto }),
-    });
-    state.assistOffer = id;
-    state.assistMode = res.mode;
-    $("assist-title").textContent = res.mode === "auto" ? "Candidature automatique" : "Candidature manuelle";
-    $("assist-report").classList.add("hidden");
-    $("assist-report").innerHTML = "";
-    $("assist-kv").innerHTML = res.fields.map((f) => `
-      <div class="kv-row"><span class="k">${esc(f.label)}</span><span class="v">${esc(f.value)}</span></div>`).join("");
-    $("assist-pdf").href = "/api/offers/" + encodeURIComponent(id) + "/cv.pdf";
-    $("assist-wait-row").classList.remove("hidden");
-    $("assist-done-row").classList.add("hidden");
-    $("assist-wait-text").textContent = res.mode === "auto"
-      ? "Remplissage du formulaire en cours…"
-      : "En attente de la fermeture du navigateur…";
-    $("assist-sub").textContent = res.mode === "auto"
-      ? "Un navigateur s'ouvre et remplit le formulaire sous tes yeux : champs, CV joint, " +
-        "puis envoi. Vérifie le résultat dans la fenêtre, corrige si besoin, et ferme-la."
-      : "Un navigateur vient de s'ouvrir sur l'offre. Remplis le formulaire avec les " +
-        "informations ci-dessous, joins le CV, et clique toi-même sur envoyer. " +
-        "Ferme ensuite la fenêtre du navigateur.";
-    $("assist-overlay").classList.add("open");
-    poll(true);
+    const data = await api("/api/offers/" + encodeURIComponent(id) + "/kit");
+    state.kitOffer = id;
+    $("kit-offer-title").textContent =
+      `${data.offer.title} — ${data.offer.company || "—"}`;
+    renderKit(data);
+    $("kit-overlay").classList.add("open");
   } catch (e) { toast(e.message, "error"); }
 }
 
-function renderAssistReport(report) {
-  const box = $("assist-report");
-  const rows = [];
-  if (report.filled.length) {
-    const labels = [...new Set(report.filled)].map((f) => FIELD_LABELS[f] || f).join(", ");
-    rows.push(`<div class="kv-row"><span class="k">Champs remplis</span><span class="v">${esc(labels)}</span></div>`);
-  }
-  rows.push(`<div class="kv-row"><span class="k">CV joint</span><span class="v">${report.uploaded ? "oui" : "non"}</span></div>`);
-  rows.push(`<div class="kv-row"><span class="k">Envoi</span><span class="v" style="color:${report.submitted ? "var(--success)" : "var(--warning)"}">${report.submitted ? "bouton d'envoi cliqué — vérifie dans le navigateur" : "non soumis"}</span></div>`);
-  for (const note of report.notes) {
-    rows.push(`<div class="kv-row"><span class="k">Note</span><span class="v" style="color:var(--warning)">${esc(note)}</span></div>`);
-  }
-  box.innerHTML = rows.join("");
-  box.classList.remove("hidden");
-  $("assist-wait-text").textContent = "Vérifie dans le navigateur, puis ferme la fenêtre.";
-}
-
-function handleAssistState(assist) {
-  // Navigateur ouvert depuis l'écran Connexions : aucune candidature en jeu.
-  if (assist.mode === "login") {
-    if (state.loginPending && (assist.status === "closed" || assist.status === "error")) {
-      state.loginPending = false;
-      toast(assist.status === "error"
-        ? "Connexion : " + (assist.error || "erreur")
-        : "Session enregistrée dans le profil du navigateur.",
-        assist.status === "error" ? "error" : "success");
-      api("/api/assist/done", { method: "POST", body: JSON.stringify({ applied: false }) }).catch(() => {});
-    }
-    return;
-  }
-  if (!state.assistOffer) return;
-  if (assist.report && state.assistMode === "auto" && !$("assist-report").innerHTML) {
-    renderAssistReport(assist.report);
-  }
-
-  const waitingLogin = assist.status === "login_required";
-  $("assist-login-row").classList.toggle("hidden", !waitingLogin);
-  $("assist-wait-row").classList.toggle("hidden", waitingLogin || assist.status === "closed");
-  if (waitingLogin) {
-    $("assist-login-text").textContent =
-      `${assist.login_domain || "Ce site"} demande une connexion. Connecte-toi dans la ` +
-      "fenêtre déjà ouverte, puis clique ci-contre : jobot reprendra la candidature.";
-  }
-
-  if (assist.status === "closed") {
-    $("assist-wait-row").classList.add("hidden");
-    $("assist-done-row").classList.remove("hidden");
-    $("assist-sub").textContent = "Navigateur fermé.";
-  } else if (assist.status === "error") {
-    toast("Candidature formulaire : " + (assist.error || "erreur"), "error");
-    $("assist-overlay").classList.remove("open");
-    state.assistOffer = null;
-    api("/api/assist/done", { method: "POST", body: JSON.stringify({ applied: false }) }).catch(() => {});
-  }
-}
-
-async function assistResume() {
-  const btn = $("assist-resume");
+async function regenerateLetter() {
+  const id = state.kitOffer;
+  if (!id) return;
+  const btn = $("kit-regen");
   btn.disabled = true;
+  btn.textContent = "Rédaction…";
   try {
-    await api("/api/assist/resume", { method: "POST" });
-    $("assist-login-row").classList.add("hidden");
-    $("assist-wait-row").classList.remove("hidden");
-    $("assist-wait-text").textContent = "Reprise du remplissage…";
+    const data = await api("/api/offers/" + encodeURIComponent(id) + "/letter", {
+      method: "POST",
+    });
+    // Le lien vers le PDF ne change pas d'URL : on le rafraichit pour eviter
+    // que le navigateur ne resserve l'ancienne version depuis son cache.
+    data.letter_url += "?v=" + Date.now();
+    renderKit(data);
+    toast("Lettre réécrite.", "success");
+    await refreshOffers();
   } catch (e) {
     toast(e.message, "error");
   } finally {
     btn.disabled = false;
+    btn.textContent = "Réécrire la lettre";
   }
 }
 
-async function refreshLogins() {
-  let rows = [];
-  try { rows = await api("/api/logins"); } catch (e) { return; }
-  $("logins-section").classList.toggle("hidden", rows.length === 0);
-  $("logins-rows").innerHTML = rows.map((r) => `
-    <div class="applied-row">
-      <span class="t">${esc(r.domain)}</span>
-      <span class="c">${r.offers} offre${r.offers > 1 ? "s" : ""}</span>
-      <button class="btn secondary" style="height:36px; padding:0 20px"
-              data-login="${esc(r.domain)}">Se connecter</button>
-    </div>`).join("");
-  for (const btn of document.querySelectorAll("[data-login]")) {
-    btn.onclick = () => openLogin(btn.dataset.login);
-  }
-}
-
-async function openLogin(domain) {
+async function markApplied() {
+  const id = state.kitOffer;
+  if (!id) return;
   try {
-    await api("/api/logins/open", { method: "POST", body: JSON.stringify({ domain }) });
-    state.loginPending = true;
-    toast(`Navigateur ouvert sur ${domain} — connecte-toi, puis ferme la fenêtre.`, "success");
-    poll(true);
+    await api("/api/offers/" + encodeURIComponent(id) + "/applied", { method: "POST" });
+    toast("Candidature enregistrée — retrouve-la dans « Candidatures ».", "success");
+    $("kit-overlay").classList.remove("open");
+    state.kitOffer = null;
+    await refreshOffers();
   } catch (e) { toast(e.message, "error"); }
-}
-
-async function assistFinish(applied) {
-  try {
-    await api("/api/assist/done", { method: "POST", body: JSON.stringify({ applied }) });
-  } catch (e) { toast(e.message, "error"); }
-  state.assistOffer = null;
-  $("assist-overlay").classList.remove("open");
-  await refreshOffers();
-  poll();
 }
 
 /* ---- CV maître (modale, toujours accessible) ---- */
@@ -963,6 +921,16 @@ async function openSettings() {
     : "Clé API — aucune enregistrée";
   toggleBaseUrlRow();
 
+  $("set-ft-id").value = data.sources.ft_client_id || "";
+  $("set-ft-secret").value = "";
+  $("set-ft-secret").placeholder = data.sources.ft_secret_set
+    ? "France Travail — secret déjà enregistré, laisse vide pour le garder"
+    : "France Travail — client secret";
+  $("set-lba-key").value = "";
+  $("set-lba-key").placeholder = data.sources.lba_key_set
+    ? "La Bonne Alternance — jeton déjà enregistré, laisse vide pour le garder"
+    : "La Bonne Alternance — jeton d'API";
+
   $("set-smtp-host").value = data.smtp.host || "";
   $("set-smtp-port").value = data.smtp.port || "";
   $("set-smtp-user").value = data.smtp.user || "";
@@ -981,14 +949,21 @@ async function saveSettings() {
     llm_provider: $("set-llm-provider").value,
     llm_model: $("set-llm-model").value,
     llm_base_url: $("set-llm-baseurl").value,
+    ft_client_id: $("set-ft-id").value,
     smtp_host: $("set-smtp-host").value,
     smtp_port: parseInt($("set-smtp-port").value, 10) || 0,
     smtp_user: $("set-smtp-user").value,
     smtp_from: $("set-smtp-from").value,
     smtp_tls: $("set-smtp-tls").value,
   };
+  // Les secrets ne partent que si l'utilisateur en a saisi un : un champ vide
+  // veut dire « garde celui déjà enregistré », jamais « efface-le ».
   const llmKey = $("set-llm-key").value.trim();
   if (llmKey) payload.llm_api_key = llmKey;
+  const ftSecret = $("set-ft-secret").value.trim();
+  if (ftSecret) payload.ft_client_secret = ftSecret;
+  const lbaKey = $("set-lba-key").value.trim();
+  if (lbaKey) payload.lba_api_key = lbaKey;
   const smtpPass = $("set-smtp-password").value;
   if (smtpPass) payload.smtp_password = smtpPass;
 
@@ -999,6 +974,8 @@ async function saveSettings() {
     const data = await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
     state.meta.llm_ok = data.llm_ok;
     state.meta.smtp_ok = data.smtp_ok;
+    state.meta.ft_ok = data.ft_ok;
+    state.meta.lba_ok = data.lba_ok;
     showSections();
     toast("Réglages enregistrés.", "success");
     $("settings-overlay").classList.remove("open");
@@ -1040,9 +1017,8 @@ async function init() {
   $("dot-cv-btn").onclick = openCvModal;
   $("cv-missing-btn").onclick = openCvModal;
   $("apply-confirm").onclick = confirmApply;
-  $("assist-yes").onclick = () => assistFinish(true);
-  $("assist-no").onclick = () => assistFinish(false);
-  $("assist-resume").onclick = assistResume;
+  $("kit-regen").onclick = regenerateLetter;
+  $("kit-applied").onclick = markApplied;
   $("settings-btn").onclick = openSettings;
   $("dot-llm-btn").onclick = openSettings;
   $("dot-smtp-btn").onclick = openSettings;

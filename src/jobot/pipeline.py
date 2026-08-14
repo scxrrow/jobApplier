@@ -5,8 +5,11 @@ et par le CLI pour les etapes unitaires. Le comportement par defaut garde la
 validation humaine avant tout envoi ; le mode autonome (validation desactivee)
 est un choix explicite de l'utilisateur au lancement de la recherche.
 
-Meme en mode autonome, le canal `form` n'est jamais soumis automatiquement :
-l'assistant navigateur reste le seul chemin, avec un clic humain final.
+Le mode autonome ne concerne que le canal `email`. Sur le canal `site`, jobot
+prepare le dossier (CV adapte + lettre) et s'arrete la : c'est le candidat qui
+depose sur la plateforme de l'offre. Remplir ces formulaires a sa place a ete
+tente puis abandonne — chaque plateforme de recrutement a son propre
+formulaire, et aucune heuristique ne tient sur l'ensemble.
 """
 
 from __future__ import annotations
@@ -24,20 +27,24 @@ from . import db
 from .config import settings
 from .cv import MasterCV, load_master_cv
 from .filters import DEFAULT_EXCLUDE, FilterRules, normalize
+from .letter import LetterDraft, write_letter
 from .llm import build_client
 from .mailer import build_message, send_message
 from .models import Channel, Offer, Status
-from .render import render_html, render_pdf
+from .render import render_html, render_letter_html, render_pdf
 from .sources import (
     ApecClient,
     ApecError,
     FranceTravailClient,
     FranceTravailError,
+    LaBonneAlternanceClient,
+    LaBonneAlternanceError,
     parse_apec_offer,
     parse_ft_offer,
+    parse_lba_offer,
 )
 
-SOURCE_NAMES = ("francetravail", "apec")
+SOURCE_NAMES = ("francetravail", "apec", "labonnealternance")
 
 # Types de contrat proposes dans l'UI. La valeur est celle de
 # `filters.CONTRACT_KINDS` (+ 'tous' pour ne pas filtrer).
@@ -159,9 +166,6 @@ class SearchParams(BaseModel):
     jours: int = 7
     sources: list[str] = Field(default_factory=lambda: list(SOURCE_NAMES))
     validation_humaine: bool = True
-    # Canal form : remplissage + soumission du formulaire par Playwright apres
-    # la validation de l'offre par l'utilisateur (sinon simple ouverture).
-    form_auto: bool = True
     score_min: int = 60
     limite_score: int = 100
     max_par_requete: int = 600
@@ -333,6 +337,17 @@ def _ft_days(jours: int) -> int:
     return FT_DAYS[-1]
 
 
+def _source_client(name: str):
+    """(client, exception a rattraper, parseur) pour une source donnee."""
+    if name == "francetravail":
+        client = FranceTravailClient(settings.ft_client_id, settings.ft_client_secret)
+        return client, FranceTravailError, parse_ft_offer
+    if name == "labonnealternance":
+        client = LaBonneAlternanceClient(settings.lba_api_key)
+        return client, LaBonneAlternanceError, parse_lba_offer
+    return ApecClient(), ApecError, parse_apec_offer
+
+
 def fetch_offers(
     params: SearchParams, log: Log, check_cancel: Callable[[], None] = lambda: None
 ) -> tuple[list[Offer], dict[str, dict]]:
@@ -349,13 +364,14 @@ def fetch_offers(
     ]
 
     for name in params.sources:
+        # La Bonne Alternance ne publie que de l'alternance : l'interroger pour
+        # un CDI reviendrait a payer des requetes pour zero resultat exploitable.
+        if name == "labonnealternance" and kind not in ("", "alternance"):
+            log("info", "labonnealternance ignorée : source réservée à l'alternance")
+            continue
+
         log("info", f"Source {name} : {len(combos)} requête(s)")
-        if name == "francetravail":
-            client = FranceTravailClient(settings.ft_client_id, settings.ft_client_secret)
-            error_type = FranceTravailError
-        else:
-            client = ApecClient()
-            error_type = ApecError
+        client, error_type, parse = _source_client(name)
 
         with client:
             for dep, kw in combos:
@@ -383,7 +399,6 @@ def fetch_offers(
                     log("warn", f"{name} {label} : {exc}")
                     continue
 
-                parse = parse_ft_offer if name == "francetravail" else parse_apec_offer
                 fresh = 0
                 for raw in raw_offers:
                     offer = parse(raw)
@@ -406,7 +421,11 @@ def reparse_routing(conn) -> int:
     stockees en profitent sans nouvel appel API. Retourne le nombre d'offres
     dont le routage a change.
     """
-    parsers = {"francetravail": parse_ft_offer, "apec": parse_apec_offer}
+    parsers = {
+        "francetravail": parse_ft_offer,
+        "apec": parse_apec_offer,
+        "labonnealternance": parse_lba_offer,
+    }
     rows = conn.execute("SELECT id, source, raw FROM offers WHERE raw IS NOT NULL").fetchall()
 
     changed = 0
@@ -474,17 +493,56 @@ def score_pending(
     return scored
 
 
+def safe_id(offer_id: str) -> str:
+    """Nom de fichier utilisable a partir d'un id d'offre ('source:natif')."""
+    return offer_id.replace(":", "_").replace("/", "_")
+
+
 def build_cv_files(row, cv: MasterCV, out_dir: Path) -> tuple[Path, Path]:
     """Rend le CV adapte a une offre scoree. Retourne (html_path, pdf_path)."""
     html = render_html(cv, json.loads(row["cv_selection"]))
-    safe_id = row["id"].replace(":", "_").replace("/", "_")
-    html_path = out_dir / f"{safe_id}.html"
-    pdf_path = out_dir / f"{safe_id}.pdf"
+    stem = safe_id(row["id"])
+    html_path = out_dir / f"{stem}.html"
+    pdf_path = out_dir / f"{stem}.pdf"
 
     out_dir.mkdir(parents=True, exist_ok=True)
     html_path.write_text(html, encoding="utf-8")
     render_pdf(html, pdf_path)
     return html_path, pdf_path
+
+
+def build_letter_files(
+    row, cv: MasterCV, out_dir: Path, draft: LetterDraft | None = None
+) -> tuple[Path, Path]:
+    """Rend en PDF la lettre d'une offre. Retourne (html_path, pdf_path).
+
+    N'appelle jamais le LLM : la lettre vient de `draft`, ou a defaut de celle
+    deja enregistree en base par `draft_letter`. Le parametre evite d'avoir a
+    relire la ligne juste apres l'avoir ecrite.
+    """
+    if draft is None:
+        if not row["letter"]:
+            raise ValueError("Aucune lettre générée pour cette offre.")
+        draft = LetterDraft.model_validate_json(row["letter"])
+    html = render_letter_html(cv, offer_from_row(row), draft.paragraphs())
+
+    stem = f"{safe_id(row['id'])}-lettre"
+    html_path = out_dir / f"{stem}.html"
+    pdf_path = out_dir / f"{stem}.pdf"
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    html_path.write_text(html, encoding="utf-8")
+    render_pdf(html, pdf_path)
+    return html_path, pdf_path
+
+
+def draft_letter(conn, row, cv: MasterCV, *, client) -> LetterDraft:
+    """Ecrit la lettre de motivation d'une offre et l'enregistre en base."""
+    offer = offer_from_row(row)
+    draft = write_letter(client, offer, cv, json.loads(row["cv_selection"] or "[]"))
+    db.save_letter(conn, offer.id, draft.model_dump_json())
+    conn.commit()
+    return draft
 
 
 def generate_for_candidates(
@@ -493,9 +551,16 @@ def generate_for_candidates(
     log: Log,
     *,
     cv: MasterCV,
+    client,
     check_cancel: Callable[[], None] = lambda: None,
 ) -> int:
-    """Genere les CV PDF des offres scorees au-dessus du seuil (si pas deja faits)."""
+    """Prepare le dossier des offres scorees au-dessus du seuil : CV + lettre.
+
+    Chaque piece est produite une seule fois — un PDF deja sur le disque et une
+    lettre deja en base sont conservees, pour ne pas repayer un appel LLM a
+    chaque recherche. Le nombre retourne compte les offres dont au moins une
+    piece a ete produite.
+    """
     rows = conn.execute(
         "SELECT * FROM offers WHERE status IN (?, ?) AND COALESCE(score, 0) >= ? "
         "ORDER BY score DESC",
@@ -505,27 +570,52 @@ def generate_for_candidates(
     generated = 0
     for row in rows:
         check_cancel()
-        safe_id = row["id"].replace(":", "_").replace("/", "_")
-        if (settings.out_dir / f"{safe_id}.pdf").exists():
-            continue
-        try:
-            build_cv_files(row, cv, settings.out_dir)
-            generated += 1
-            log("info", f"CV généré — {row['title'][:70]}")
-        except Exception as exc:  # noqa: BLE001 - on continue sur les autres offres
-            log("error", f"Génération du CV en échec pour « {row['title'][:50]} » : {exc}")
+        touched = False
+
+        if not (settings.out_dir / f"{safe_id(row['id'])}.pdf").exists():
+            try:
+                build_cv_files(row, cv, settings.out_dir)
+                touched = True
+                log("info", f"CV généré — {row['title'][:70]}")
+            except Exception as exc:  # noqa: BLE001 - on continue sur les autres offres
+                log("error", f"Génération du CV en échec pour « {row['title'][:50]} » : {exc}")
+
+        if not row["letter"]:
+            try:
+                draft = draft_letter(conn, row, cv, client=client)
+                build_letter_files(row, cv, settings.out_dir, draft)
+                touched = True
+                log("info", f"Lettre rédigée — {row['title'][:70]}")
+            except Exception as exc:  # noqa: BLE001 - la lettre est optionnelle
+                log("error", f"Lettre en échec pour « {row['title'][:50]} » : {exc}")
+
+        generated += touched
     return generated
 
 
 def send_application(conn, row, cv: MasterCV) -> None:
-    """Genere le CV, construit l'email et l'envoie. Marque l'offre 'applied'.
+    """Genere le dossier, construit l'email et l'envoie. Marque l'offre 'applied'.
 
     L'appelant est responsable de la validation humaine (ou de son
     desactivation explicite par l'utilisateur en mode autonome).
+
+    La lettre part en piece jointe quand elle existe. Elle est optionnelle : une
+    generation de lettre en echec ne doit pas empecher une candidature de
+    partir avec son CV.
     """
     offer = offer_from_row(row)
     _, pdf_path = build_cv_files(row, cv, settings.out_dir)
-    msg = build_message(settings=settings, cv=cv, offer=offer, pdf_path=pdf_path)
+
+    letter_path = None
+    if row["letter"]:
+        try:
+            _, letter_path = build_letter_files(row, cv, settings.out_dir)
+        except Exception:  # noqa: BLE001 - on envoie le CV seul plutot que rien
+            letter_path = None
+
+    msg = build_message(
+        settings=settings, cv=cv, offer=offer, pdf_path=pdf_path, letter_path=letter_path
+    )
     send_message(msg, settings)
     db.mark_applied(conn, offer.id)
     conn.commit()
@@ -542,8 +632,8 @@ def auto_dispatch(
 ) -> dict[str, int]:
     """Mode autonome : met en file les offres au-dessus du seuil et envoie les emails.
 
-    Le canal `form` n'est jamais soumis automatiquement : ces offres restent en
-    file pour l'assistant navigateur (clic humain final).
+    Le canal `site` n'a rien d'automatisable : le dossier est pret, ces offres
+    restent en file jusqu'a ce que le candidat aille deposer lui-meme.
     """
     rows = conn.execute(
         "SELECT * FROM offers WHERE status = ? AND COALESCE(score, 0) >= ? "
@@ -556,7 +646,7 @@ def auto_dispatch(
     if rows:
         log("info", f"{len(rows)} offre(s) ≥ {params.score_min}/100 mises en file")
 
-    sent = failed = forms = 0
+    sent = failed = sites = 0
     queued = conn.execute(
         "SELECT * FROM offers WHERE status = ? ORDER BY score DESC",
         (str(Status.QUEUED),),
@@ -565,7 +655,7 @@ def auto_dispatch(
     for row in queued:
         check_cancel()
         if row["channel"] != str(Channel.EMAIL):
-            forms += 1
+            sites += 1
             continue
         if not smtp_ok:
             failed += 1
@@ -578,15 +668,15 @@ def auto_dispatch(
             failed += 1
             log("error", f"Envoi en échec pour « {row['title'][:50]} » : {exc}")
 
-    if forms:
+    if sites:
         log(
-            "warn",
-            f"{forms} candidature(s) par formulaire en attente : jobot ne soumet "
-            "jamais un formulaire à ta place — ouvre l'assistant depuis l'interface.",
+            "info",
+            f"{sites} dossier(s) prêt(s) à déposer : CV et lettre sont générés, "
+            "il ne reste qu'à les déposer sur le site de chaque offre.",
         )
     if not smtp_ok and failed:
         log("warn", "SMTP non configuré : les candidatures email restent en file.")
-    return {"sent": sent, "failed": failed, "forms": forms}
+    return {"sent": sent, "failed": failed, "sites": sites}
 
 
 def run_pipeline(params: SearchParams, state: RunState) -> None:
@@ -602,6 +692,8 @@ def run_pipeline(params: SearchParams, state: RunState) -> None:
 
         if "francetravail" in params.sources:
             settings.require_ft_credentials()
+        if "labonnealternance" in params.sources:
+            settings.require_lba_key()
 
         smtp_ok = True
         try:
@@ -619,12 +711,17 @@ def run_pipeline(params: SearchParams, state: RunState) -> None:
         try:
             state.begin("fetch")
             offers, raws = fetch_offers(params, state.log, state.check_cancel)
-            new, updated, unchanged = db.upsert_offers(conn, offers, raws)
+            new, updated, unchanged, cross = db.upsert_offers(conn, offers, raws)
             state.log(
                 "info",
                 f"{len(offers)} offres uniques — {new} nouvelles, "
                 f"{updated} mises à jour, {unchanged} inchangées",
             )
+            if cross:
+                state.log(
+                    "info",
+                    f"{cross} offre(s) déjà vue(s) sur une autre source, ignorée(s)",
+                )
             state.end("fetch")
 
             state.begin("filtre")
@@ -649,7 +746,8 @@ def run_pipeline(params: SearchParams, state: RunState) -> None:
 
             state.begin("generation")
             generate_for_candidates(
-                conn, params, state.log, cv=cv, check_cancel=state.check_cancel
+                conn, params, state.log, cv=cv, client=client,
+                check_cancel=state.check_cancel,
             )
             state.end("generation")
 
@@ -657,7 +755,7 @@ def run_pipeline(params: SearchParams, state: RunState) -> None:
                 state.end("envoi", "waiting")
                 state.log(
                     "success",
-                    "Recherche terminée — les candidatures attendent ta validation ci-dessous.",
+                    "Recherche terminée — les dossiers t'attendent ci-dessous.",
                 )
             else:
                 state.begin("envoi")

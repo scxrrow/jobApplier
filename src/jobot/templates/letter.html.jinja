@@ -1,0 +1,131 @@
+{# Lettre de motivation. Seuls `paragraphs` viennent du LLM (accroche,
+   adequation, motivation — cf. letter.py) : en-tete, objet, formule d'appel,
+   formule de politesse et signature sont fixes ici, pour qu'aucune formule
+   inventee ne parte chez un recruteur.
+
+   Fond blanc, contrairement au CV : une lettre se lit et s'imprime sur du
+   papier, et un aplat sombre en A4 passe mal a l'impression.
+
+   Variables : cv, offer, paragraphs, today. #}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Lettre de motivation {{ cv.personal.name }}</title>
+    <style>
+        :root {
+            --ink: #0a192f;
+            --dim: #5a6478;
+            --rule: #0b7a63;
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f0f2f5;
+            margin: 0; padding: 0;
+            color: var(--ink);
+            font-size: 10.5pt;
+        }
+
+        .a4-page {
+            width: 210mm;
+            height: 297mm;
+            margin: 0 auto;
+            background: #fff;
+            padding: 24mm 22mm;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 0 15px rgba(0,0,0,0.4);
+        }
+
+        header {
+            border-bottom: 2px solid var(--rule);
+            padding-bottom: 10px;
+            margin-bottom: 26px;
+        }
+        header h1 {
+            margin: 0;
+            font-size: 20pt;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: -0.3px;
+        }
+        header .headline { color: var(--rule); font-size: 11.5pt; margin-top: 2px; }
+        header .contact {
+            margin-top: 8px;
+            font-size: 9.5pt;
+            color: var(--dim);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px 14px;
+        }
+
+        .recipient { margin-bottom: 22px; font-size: 10pt; line-height: 1.5; }
+        .recipient .company { font-weight: 700; }
+        .recipient .place { color: var(--dim); }
+
+        .date { text-align: right; color: var(--dim); font-size: 10pt; margin-bottom: 22px; }
+
+        .subject {
+            font-weight: 700;
+            margin-bottom: 22px;
+            padding-left: 10px;
+            border-left: 3px solid var(--rule);
+        }
+
+        p { line-height: 1.62; margin: 0 0 14px 0; text-align: justify; }
+
+        .signature { margin-top: auto; padding-top: 18px; }
+        .signature .name { font-weight: 700; margin-top: 4px; }
+
+        @media print {
+            body { padding: 0; background: none; }
+            .a4-page { margin: 0; box-shadow: none; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="a4-page">
+    <header>
+        <h1>{{ cv.personal.name }}</h1>
+        <div class="headline">{{ cv.personal.headline }}</div>
+        <div class="contact">
+            <span>{{ cv.personal.email }}</span>
+            {% if cv.personal.phone %}<span>{{ cv.personal.phone }}</span>{% endif %}
+            {% if cv.personal.github %}<span>{{ cv.personal.github }}</span>{% endif %}
+        </div>
+    </header>
+
+    <div class="recipient">
+        {% if offer.company %}<div class="company">{{ offer.company }}</div>{% endif %}
+        <div>Service recrutement</div>
+        {% if offer.location %}<div class="place">{{ offer.location }}</div>{% endif %}
+    </div>
+
+    <div class="date">Le {{ today }}</div>
+
+    <div class="subject">
+        Objet : candidature au poste de {{ offer.title }}{% if offer.contract_label %} ({{ offer.contract_label }}){% endif %}
+    </div>
+
+    <p>Madame, Monsieur,</p>
+
+    {% for paragraph in paragraphs %}
+    <p>{{ paragraph }}</p>
+    {% endfor %}
+
+    <p>
+        Je me tiens à votre disposition pour un échange et vous prie d'agréer,
+        Madame, Monsieur, l'expression de mes salutations distinguées.
+    </p>
+
+    <div class="signature">
+        <div>Cordialement,</div>
+        <div class="name">{{ cv.personal.name }}</div>
+    </div>
+</div>
+
+</body>
+</html>

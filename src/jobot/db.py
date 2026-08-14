@@ -6,7 +6,11 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .models import Offer, Status
+from .models import Offer, Status, dedup_key_for
+
+# Proprietaire de toutes les offres tant que jobot tourne en local, pour un
+# seul candidat. Voir `_migrate` pour le raisonnement.
+LOCAL_USER = "local"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS offers (
@@ -66,18 +70,59 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE offers ADD COLUMN cv_selection TEXT")
     if "applied_at" not in cols:
         conn.execute("ALTER TABLE offers ADD COLUMN applied_at TEXT")
+    if "letter" not in cols:
+        # Lettre de motivation generee, en JSON (cf. letter.LetterDraft).
+        conn.execute("ALTER TABLE offers ADD COLUMN letter TEXT")
+    if "dedup_key" not in cols:
+        # Rapproche la meme annonce publiee sur plusieurs sources.
+        conn.execute("ALTER TABLE offers ADD COLUMN dedup_key TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_offers_dedup ON offers(dedup_key)")
+    # Hors du bloc ci-dessus, et donc rejoue a chaque ouverture : une colonne
+    # ajoutee par une version anterieure du code n'aurait jamais ete remplie,
+    # et un rattrapage interrompu doit pouvoir reprendre.
+    _backfill_dedup_keys(conn)
+    if "user_id" not in cols:
+        # jobot est mono-utilisateur pour l'instant : tout appartient a
+        # LOCAL_USER. La colonne existe des maintenant pour qu'un passage en
+        # multi-utilisateur soit une migration de donnees et non une reecriture
+        # des requetes — toutes les lectures filtrent deja dessus.
+        conn.execute(
+            f"ALTER TABLE offers ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LOCAL_USER}'"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_offers_user ON offers(user_id)")
+
+    # Le canal 'form' designait un formulaire que jobot remplissait lui-meme.
+    # L'auto-remplissage a ete abandonne (trop de plateformes, aucune ne se
+    # ressemble) : le canal s'appelle desormais 'site' et signifie « le
+    # candidat depose son dossier la-bas ».
+    conn.execute("UPDATE offers SET channel = 'site' WHERE channel = 'form'")
     conn.commit()
+
+
+def _backfill_dedup_keys(conn: sqlite3.Connection) -> None:
+    """Calcule la cle de dedup des offres deja en base.
+
+    Sans ce rattrapage, les offres anterieures a la colonne resteraient a NULL
+    et ne bloqueraient jamais un doublon venu d'une nouvelle source.
+    """
+    rows = conn.execute(
+        "SELECT id, title, company FROM offers WHERE dedup_key IS NULL"
+    ).fetchall()
+    conn.executemany(
+        "UPDATE offers SET dedup_key = ? WHERE id = ?",
+        [(dedup_key_for(r["id"], r["title"], r["company"]), r["id"]) for r in rows],
+    )
 
 
 def upsert_offers(
     conn: sqlite3.Connection, offers: Iterable[Offer], raws: dict[str, dict] | None = None
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int]:
     """Insere les nouvelles offres, re-ouvre celles dont le contenu a change.
 
-    Retourne (nouvelles, mises_a_jour, inchangees).
+    Retourne (nouvelles, mises_a_jour, inchangees, doublons_inter_sources).
     """
     raws = raws or {}
-    new = updated = unchanged = 0
+    new = updated = unchanged = cross = 0
 
     for offer in offers:
         row = conn.execute(
@@ -85,6 +130,16 @@ def upsert_offers(
         ).fetchone()
 
         if row is None:
+            # La meme annonce est peut-etre deja en base via une autre source :
+            # l'ignorer economise un scoring, un CV et une lettre.
+            twin = conn.execute(
+                "SELECT id FROM offers WHERE dedup_key = ? AND id != ? LIMIT 1",
+                (offer.dedup_key, offer.id),
+            ).fetchone()
+            if twin is not None:
+                cross += 1
+                continue
+
             conn.execute(
                 """
                 INSERT INTO offers (
@@ -92,8 +147,8 @@ def upsert_offers(
                     contract_type, contract_label, location, postal_code, department,
                     rome_code, rome_label, salary, experience, is_alternance,
                     apply_email, apply_url, origin_url, channel,
-                    published_at, fetched_at, content_hash, status, raw
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    published_at, fetched_at, content_hash, status, raw, dedup_key
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     offer.id, offer.source, offer.native_id, offer.title, offer.company,
@@ -107,6 +162,7 @@ def upsert_offers(
                     str(Status.NEW),
                     json.dumps(raws.get(offer.id), ensure_ascii=False)
                     if offer.id in raws else None,
+                    offer.dedup_key,
                 ),
             )
             new += 1
@@ -119,7 +175,7 @@ def upsert_offers(
                     title=?, company=?, description=?, salary=?,
                     apply_email=?, apply_url=?, origin_url=?, channel=?,
                     fetched_at=?, content_hash=?, status=?, filter_reason=NULL,
-                    score=NULL, score_reason=NULL
+                    score=NULL, score_reason=NULL, letter=NULL, dedup_key=?
                 WHERE id=?
                 """,
                 (
@@ -127,7 +183,7 @@ def upsert_offers(
                     offer.apply_email, offer.apply_url, offer.origin_url,
                     str(offer.channel),
                     offer.fetched_at.isoformat(), offer.content_hash,
-                    str(Status.NEW), offer.id,
+                    str(Status.NEW), offer.dedup_key, offer.id,
                 ),
             )
             updated += 1
@@ -135,7 +191,7 @@ def upsert_offers(
             unchanged += 1
 
     conn.commit()
-    return new, updated, unchanged
+    return new, updated, unchanged, cross
 
 
 def update_routing(conn: sqlite3.Connection, offer: Offer) -> bool:
@@ -197,6 +253,12 @@ def save_score(
         "UPDATE offers SET status=?, score=?, score_reason=?, cv_selection=? WHERE id=?",
         (str(Status.SCORED), score, reason, json.dumps(selected_ids), offer_id),
     )
+
+
+def save_letter(conn: sqlite3.Connection, offer_id: str, letter_json: str) -> None:
+    """Stocke la lettre generee. Sans effet sur le statut : une lettre peut
+    etre regeneree autant de fois que le candidat le souhaite avant d'envoyer."""
+    conn.execute("UPDATE offers SET letter=? WHERE id=?", (letter_json, offer_id))
 
 
 def set_status(conn: sqlite3.Connection, offer_id: str, status: Status) -> None:

@@ -8,7 +8,6 @@ __pycache__/
 *.pyc
 jobot.db
 jobot.db-journal
-chrome-profile/
 out/
 master-cv.json
 CvTest*.html

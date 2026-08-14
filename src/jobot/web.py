@@ -2,20 +2,23 @@
 
 Toutes les routes sont des `def` synchrones : FastAPI les execute dans son
 threadpool, ce qui autorise SQLite et l'API sync de Playwright (le rendu PDF
-et l'assistant navigateur plantent dans un thread qui porte une boucle asyncio).
+plante dans un thread qui porte une boucle asyncio).
 
-La validation humaine se joue ici : `POST /api/offers/{id}/apply` n'est appele
-que par le clic explicite de l'utilisateur dans la modale de confirmation — ou
-par le pipeline en mode autonome, quand l'utilisateur a desactive la
-verification au lancement de la recherche.
+La validation humaine se joue ici. Deux chemins selon le canal de l'offre :
+
+- `POST /api/offers/{id}/apply` envoie l'email, sur clic explicite de
+  l'utilisateur (ou depuis le pipeline en mode autonome, quand il a desactive
+  la verification au lancement de la recherche) ;
+- `POST /api/offers/{id}/applied` enregistre une candidature deposee a la main
+  sur le site de l'offre. jobot ne remplit aucun formulaire : il fournit le
+  dossier, l'humain le depose.
 """
 
 from __future__ import annotations
 
-import threading
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -23,11 +26,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import db, pipeline
-from .assist import apply_url as offer_apply_url
-from .assist import clipboard_fields, open_application_page
-from .autofill import auto_apply
 from .config import reload_settings, settings, write_env_values
 from .cv import extract_master_cv, html_to_text, load_master_cv, save_master_cv
+from .letter import LetterDraft, suspect_terms
 from .llm import PRESETS as LLM_PRESETS
 from .llm import LLMError, build_client
 from .mailer import build_body, build_subject
@@ -42,10 +43,6 @@ app.mount("/assets", StaticFiles(directory=WEBUI_DIR), name="assets")
 
 def _conn():
     return db.connect(settings.db_path)
-
-
-def _safe_id(offer_id: str) -> str:
-    return offer_id.replace(":", "_").replace("/", "_")
 
 
 def _get_row(conn, offer_id: str):
@@ -76,7 +73,8 @@ def _offer_json(row, *, description: bool = False) -> dict[str, Any]:
         "url": row["apply_url"] or row["origin_url"],
         "published_at": row["published_at"],
         "applied_at": row["applied_at"],
-        "pdf_ready": (settings.out_dir / f"{_safe_id(row['id'])}.pdf").exists(),
+        "pdf_ready": (settings.out_dir / f"{pipeline.safe_id(row['id'])}.pdf").exists(),
+        "letter_ready": bool(row["letter"]),
     }
     if description:
         data["description"] = row["description"]
@@ -111,6 +109,14 @@ def _smtp_ok() -> bool:
 def _ft_ok() -> bool:
     try:
         settings.require_ft_credentials()
+        return True
+    except RuntimeError:
+        return False
+
+
+def _lba_ok() -> bool:
+    try:
+        settings.require_lba_key()
         return True
     except RuntimeError:
         return False
@@ -153,6 +159,7 @@ def meta() -> dict[str, Any]:
         "cv": _cv_status(),
         "smtp_ok": _smtp_ok(),
         "ft_ok": _ft_ok(),
+        "lba_ok": _lba_ok(),
         "llm_ok": _llm_ok(),
         "llm": {"provider": settings.jobot_llm_provider, "model": settings.jobot_llm_model},
     }
@@ -189,7 +196,6 @@ def state() -> dict[str, Any]:
     return {
         "run": pipeline.RUN.snapshot(),
         "stats": {"by_status": by_status, "by_channel": by_channel},
-        "assist": _assist_snapshot(),
     }
 
 
@@ -277,7 +283,11 @@ def apply_offer(offer_id: str) -> dict[str, Any]:
         if row["status"] not in (str(Status.SCORED), str(Status.QUEUED)):
             raise HTTPException(400, f"Offre au statut '{row['status']}', pas envoyable.")
         if row["channel"] != str(Channel.EMAIL):
-            raise HTTPException(400, "Canal formulaire : passe par l'assistant navigateur.")
+            raise HTTPException(
+                400,
+                "Cette offre se dépose sur son site : récupère le CV et la lettre, "
+                "puis marque la candidature comme envoyée.",
+            )
         if not row["cv_selection"]:
             raise HTTPException(400, "Offre pas encore scorée.")
 
@@ -297,18 +307,35 @@ def apply_offer(offer_id: str) -> dict[str, Any]:
 
 
 @app.get("/api/offers/{offer_id}/cv.pdf")
-def offer_pdf(offer_id: str) -> FileResponse:
-    return _cv_file(offer_id, "pdf")
+def offer_cv_pdf(offer_id: str) -> FileResponse:
+    return _document(offer_id, "cv", "pdf")
 
 
 @app.get("/api/offers/{offer_id}/cv.html")
-def offer_html(offer_id: str) -> FileResponse:
-    return _cv_file(offer_id, "html")
+def offer_cv_html(offer_id: str) -> FileResponse:
+    return _document(offer_id, "cv", "html")
 
 
-def _cv_file(offer_id: str, kind: str) -> FileResponse:
-    """Sert le CV adapte, en le generant au premier acces si besoin."""
-    path = settings.out_dir / f"{_safe_id(offer_id)}.{kind}"
+@app.get("/api/offers/{offer_id}/lettre.pdf")
+def offer_letter_pdf(offer_id: str) -> FileResponse:
+    return _document(offer_id, "letter", "pdf")
+
+
+@app.get("/api/offers/{offer_id}/lettre.html")
+def offer_letter_html(offer_id: str) -> FileResponse:
+    return _document(offer_id, "letter", "html")
+
+
+def _document(offer_id: str, kind: str, ext: str) -> FileResponse:
+    """Sert une piece du dossier, en la rendant au premier acces si besoin.
+
+    Le rendu PDF est paresseux : la generation du pipeline couvre les offres
+    au-dessus du seuil, mais le candidat peut ouvrir n'importe quelle offre
+    scoree, y compris sous le seuil.
+    """
+    stem = pipeline.safe_id(offer_id) + ("-lettre" if kind == "letter" else "")
+    path = settings.out_dir / f"{stem}.{ext}"
+
     if not path.exists():
         conn = _conn()
         try:
@@ -316,261 +343,119 @@ def _cv_file(offer_id: str, kind: str) -> FileResponse:
         finally:
             conn.close()
         if not row["cv_selection"]:
-            raise HTTPException(400, "Offre pas encore scorée : aucun CV à générer.")
+            raise HTTPException(400, "Offre pas encore scorée : rien à générer.")
+        if kind == "letter" and not row["letter"]:
+            raise HTTPException(
+                400, "Aucune lettre pour cette offre : lance la génération d'abord."
+            )
         try:
             cv = load_master_cv(settings.cv_path)
-            pipeline.build_cv_files(row, cv, settings.out_dir)
+            if kind == "letter":
+                pipeline.build_letter_files(row, cv, settings.out_dir)
+            else:
+                pipeline.build_cv_files(row, cv, settings.out_dir)
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"Génération du CV en échec : {exc}")
-    media = "application/pdf" if kind == "pdf" else "text/html"
+            raise HTTPException(500, f"Génération en échec : {exc}")
+
+    media = "application/pdf" if ext == "pdf" else "text/html"
     return FileResponse(path, media_type=media)
 
 
 # ---------------------------------------------------------------------------
-# Candidature par formulaire (canal `form`). Un seul navigateur a la fois.
-# Deux modes, choisis par l'utilisateur : automatique (Playwright remplit et
-# soumet, apres la validation de l'offre — le navigateur reste visible) ou
-# manuel (la page s'ouvre, l'humain fait tout).
-
-_ASSIST_LOCK = threading.Lock()
-_ASSIST_IDLE: dict[str, Any] = {
-    "offer_id": None,
-    "status": "idle",
-    "error": None,
-    "fields": [],
-    "mode": "manual",
-    "report": None,
-    "login_domain": None,
-}
-_ASSIST: dict[str, Any] = dict(_ASSIST_IDLE)
-
-# Debloque le thread d'autofill en pause sur un mur de connexion.
-_RESUME = threading.Event()
-
-# Au-dela, on considere que l'utilisateur a abandonne la connexion et on
-# laisse la candidature en attente plutot que de bloquer le thread a vie.
-LOGIN_TIMEOUT_S = 900
+# Le dossier de candidature. jobot ne remplit plus aucun formulaire : chaque
+# plateforme de recrutement a le sien, et aucune heuristique ne tenait sur
+# l'ensemble. Il prepare le CV adapte et la lettre, ouvre l'offre, et c'est le
+# candidat qui depose — puis qui confirme l'envoi.
 
 
-def _assist_snapshot() -> dict[str, Any]:
-    with _ASSIST_LOCK:
-        return dict(_ASSIST)
-
-
-def _on_login_required(domain: str) -> None:
-    _RESUME.clear()
-    with _ASSIST_LOCK:
-        _ASSIST["status"] = "login_required"
-        _ASSIST["login_domain"] = domain
-
-
-def _wait_for_resume() -> bool:
-    """Bloque jusqu'au clic sur « Reprendre » dans l'UI (ou expiration).
-
-    Ne prend surtout pas `_ASSIST_LOCK` : l'UI doit pouvoir lire l'etat
-    pendant toute l'attente.
-    """
-    resumed = _RESUME.wait(timeout=LOGIN_TIMEOUT_S)
-    with _ASSIST_LOCK:
-        if _ASSIST["status"] == "login_required":
-            _ASSIST["status"] = "open"
-    return resumed
-
-
-def _assist_thread(url: str, *, auto: bool, cv, pdf_path, message: str) -> None:
+@app.get("/api/offers/{offer_id}/kit")
+def offer_kit(offer_id: str) -> dict[str, Any]:
+    """Tout ce qu'il faut pour candidater a une offre, en un appel."""
+    conn = _conn()
     try:
-        if auto:
-            def on_report(report) -> None:
-                with _ASSIST_LOCK:
-                    _ASSIST["report"] = report.as_dict()
+        row = _get_row(conn, offer_id)
+    finally:
+        conn.close()
 
-            auto_apply(
-                url,
-                cv=cv,
-                pdf_path=pdf_path,
-                message=message,
-                profile_dir=settings.chrome_profile,
-                on_report=on_report,
-                on_login_required=_on_login_required,
-                wait_for_resume=_wait_for_resume,
-            )
-        else:
-            open_application_page(url, settings.chrome_profile)
-        with _ASSIST_LOCK:
-            _ASSIST["status"] = "closed"
-    except Exception as exc:  # noqa: BLE001
-        with _ASSIST_LOCK:
-            _ASSIST["status"] = "error"
-            _ASSIST["error"] = str(exc)
+    if not row["cv_selection"]:
+        raise HTTPException(400, "Offre pas encore scorée.")
+
+    offer = pipeline.offer_from_row(row)
+    quoted = quote(offer_id, safe="")
+    kit: dict[str, Any] = {
+        "offer": _offer_json(row, description=True),
+        "apply_link": offer.apply_link,
+        "cv_url": f"/api/offers/{quoted}/cv.pdf",
+        "letter": None,
+        "letter_url": None,
+        "flagged_terms": [],
+    }
+
+    if row["letter"]:
+        try:
+            cv = load_master_cv(settings.cv_path)
+            draft = LetterDraft.model_validate_json(row["letter"])
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"Lettre illisible : {exc}")
+        kit["letter"] = draft.text()
+        kit["letter_url"] = f"/api/offers/{quoted}/lettre.pdf"
+        # Relire la lettre est obligatoire de toute facon (c'est le candidat
+        # qui la depose) : autant lui montrer ou regarder en priorite.
+        kit["flagged_terms"] = suspect_terms(draft.text(), offer, cv)
+
+    return kit
 
 
-class AssistStart(BaseModel):
-    # None : suivre la preference form_auto memorisee avec la recherche.
-    auto: bool | None = None
+@app.post("/api/offers/{offer_id}/letter")
+def regenerate_letter(offer_id: str) -> dict[str, Any]:
+    """Reecrit la lettre d'une offre. Le candidat peut relancer autant qu'il veut."""
+    try:
+        client = build_client(settings)
+    except LLMError as exc:
+        raise HTTPException(400, str(exc))
 
-
-@app.post("/api/offers/{offer_id}/assist")
-def assist_offer(offer_id: str, body: AssistStart | None = None) -> dict[str, Any]:
     conn = _conn()
     try:
         row = _get_row(conn, offer_id)
         if not row["cv_selection"]:
             raise HTTPException(400, "Offre pas encore scorée.")
-        offer = pipeline.offer_from_row(row)
-        url = offer_apply_url(offer)
-        if not url:
-            raise HTTPException(400, "Aucune URL de candidature pour cette offre.")
-
-        with _ASSIST_LOCK:
-            if _ASSIST["status"] in ("open", "login_required"):
-                raise HTTPException(409, "Un navigateur de candidature est déjà ouvert : ferme-le d'abord.")
-
         try:
             cv = load_master_cv(settings.cv_path)
-            _, pdf_path = pipeline.build_cv_files(row, cv, settings.out_dir)
+            draft = pipeline.draft_letter(conn, row, cv, client=client)
+            pipeline.build_letter_files(row, cv, settings.out_dir, draft)
+        except HTTPException:
+            raise
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(500, f"Génération du CV en échec : {exc}")
-
-        if row["status"] == str(Status.SCORED):
-            db.set_status(conn, offer_id, Status.QUEUED)
-            conn.commit()
+            raise HTTPException(500, f"Rédaction en échec : {exc}")
+        offer = pipeline.offer_from_row(row)
     finally:
         conn.close()
 
-    if body is not None and body.auto is not None:
-        auto = body.auto
-    else:
-        saved = pipeline.load_ui_params()
-        auto = saved.form_auto if saved else True
-
-    fields = [{"label": lab, "value": val} for lab, val in clipboard_fields(cv, pdf_path)]
-    _RESUME.clear()
-    with _ASSIST_LOCK:
-        _ASSIST.update(
-            {
-                "offer_id": offer_id,
-                "status": "open",
-                "error": None,
-                "fields": fields,
-                "mode": "auto" if auto else "manual",
-                "report": None,
-                "login_domain": None,
-            }
-        )
-    threading.Thread(
-        target=_assist_thread,
-        args=(url,),
-        kwargs={
-            "auto": auto,
-            "cv": cv,
-            "pdf_path": pdf_path,
-            "message": build_body(cv, offer),
-        },
-        daemon=True,
-    ).start()
-    return {"opened": True, "url": url, "fields": fields, "mode": "auto" if auto else "manual"}
+    return {
+        "letter": draft.text(),
+        "letter_url": f"/api/offers/{quote(offer_id, safe='')}/lettre.pdf",
+        "flagged_terms": suspect_terms(draft.text(), offer, cv),
+    }
 
 
-class AssistDone(BaseModel):
-    applied: bool
+@app.post("/api/offers/{offer_id}/applied")
+def mark_applied(offer_id: str) -> dict[str, Any]:
+    """Le candidat a depose son dossier sur le site de l'offre.
 
-
-@app.post("/api/assist/resume")
-def assist_resume() -> dict[str, Any]:
-    """L'utilisateur s'est connecté : l'autofill reprend où il s'était arrêté."""
-    with _ASSIST_LOCK:
-        if _ASSIST["status"] != "login_required":
-            raise HTTPException(409, "Aucune candidature en attente de connexion.")
-    _RESUME.set()
-    return {"resumed": True}
-
-
-@app.post("/api/assist/done")
-def assist_done(body: AssistDone) -> dict[str, Any]:
-    """L'utilisateur repond a « candidature envoyée ? » apres le navigateur."""
-    # Debloque un thread encore en attente de connexion, sinon il tiendrait
-    # le navigateur ouvert jusqu'a l'expiration.
-    _RESUME.set()
-    with _ASSIST_LOCK:
-        offer_id = _ASSIST["offer_id"]
-        _ASSIST.update(dict(_ASSIST_IDLE))
-    if offer_id and body.applied:
-        conn = _conn()
-        try:
-            db.mark_applied(conn, offer_id)
-            conn.commit()
-        finally:
-            conn.close()
-    return {"ok": True}
-
-
-# ---------------------------------------------------------------------------
-# Connexions aux plateformes. Le mur d'authentification est par site, pas par
-# offre : une connexion dans le profil persistant vaut pour toutes les offres
-# du domaine, et pour les runs suivants. Cet ecran permet de les faire d'avance
-# plutot que de se faire interrompre en pleine serie de candidatures.
-
-
-@app.get("/api/logins")
-def logins() -> list[dict[str, Any]]:
-    """Plateformes presentes dans les offres en attente, par volume."""
+    Aucune detection automatique : jobot n'a pas suivi le candidat sur la
+    plateforme, seul lui sait si la candidature est bien partie.
+    """
     conn = _conn()
     try:
-        rows = conn.execute(
-            "SELECT apply_url, origin_url FROM offers WHERE status IN (?, ?, ?)",
-            (str(Status.SCORED), str(Status.QUEUED), str(Status.NEW)),
-        ).fetchall()
+        row = _get_row(conn, offer_id)
+        if row["status"] == str(Status.APPLIED):
+            raise HTTPException(400, "Candidature déjà enregistrée.")
+        db.mark_applied(conn, offer_id)
+        conn.commit()
+        row = _get_row(conn, offer_id)
     finally:
         conn.close()
-
-    by_domain: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        url = row["apply_url"] or row["origin_url"]
-        if not url:
-            continue
-        domain = urlparse(url).netloc
-        if not domain:
-            continue
-        entry = by_domain.setdefault(domain, {"domain": domain, "offers": 0, "url": url})
-        entry["offers"] += 1
-    return sorted(by_domain.values(), key=lambda e: -e["offers"])
-
-
-class LoginOpen(BaseModel):
-    domain: str
-
-
-@app.post("/api/logins/open")
-def login_open(body: LoginOpen) -> dict[str, Any]:
-    """Ouvre le navigateur sur une plateforme pour s'y connecter une fois."""
-    target = next((e for e in logins() if e["domain"] == body.domain), None)
-    if target is None:
-        raise HTTPException(404, f"Aucune offre connue sur {body.domain}.")
-
-    with _ASSIST_LOCK:
-        if _ASSIST["status"] in ("open", "login_required"):
-            raise HTTPException(409, "Un navigateur est déjà ouvert : ferme-le d'abord.")
-        _ASSIST.update(
-            {
-                **_ASSIST_IDLE,
-                "status": "open",
-                "mode": "login",
-                "login_domain": body.domain,
-            }
-        )
-
-    def run() -> None:
-        try:
-            open_application_page(target["url"], settings.chrome_profile)
-            with _ASSIST_LOCK:
-                _ASSIST["status"] = "closed"
-        except Exception as exc:  # noqa: BLE001
-            with _ASSIST_LOCK:
-                _ASSIST["status"] = "error"
-                _ASSIST["error"] = str(exc)
-
-    threading.Thread(target=run, daemon=True).start()
-    return {"opened": True, "domain": body.domain, "url": target["url"]}
+    return _offer_json(row)
 
 
 # ---------------------------------------------------------------------------
@@ -587,6 +472,9 @@ _ENV_KEYS = {
     "llm_model": "JOBOT_LLM_MODEL",
     "llm_base_url": "JOBOT_LLM_BASE_URL",
     "llm_api_key": "JOBOT_LLM_API_KEY",
+    "ft_client_id": "FT_CLIENT_ID",
+    "ft_client_secret": "FT_CLIENT_SECRET",
+    "lba_api_key": "LBA_API_KEY",
     "smtp_host": "SMTP_HOST",
     "smtp_port": "SMTP_PORT",
     "smtp_user": "SMTP_USER",
@@ -614,8 +502,17 @@ def _settings_snapshot() -> dict[str, Any]:
             "tls_modes": list(SMTP_TLS_MODES),
             "password_set": bool(settings.smtp_password),
         },
+        "sources": {
+            # Les identifiants des sources qui en demandent. Comme pour le LLM
+            # et le SMTP, seuls des booleens sortent : jamais le secret.
+            "ft_client_id": settings.ft_client_id,
+            "ft_secret_set": bool(settings.ft_client_secret),
+            "lba_key_set": bool(settings.lba_api_key),
+        },
         "llm_ok": _llm_ok(),
         "smtp_ok": _smtp_ok(),
+        "ft_ok": _ft_ok(),
+        "lba_ok": _lba_ok(),
     }
 
 
@@ -631,6 +528,9 @@ class SettingsUpdate(BaseModel):
     # Chaine vide = effacement volontaire (distingue de "champ absent" via
     # model_fields_set plus bas, pas de la valeur elle-meme).
     llm_api_key: str | None = None
+    ft_client_id: str | None = None
+    ft_client_secret: str | None = None
+    lba_api_key: str | None = None
     smtp_host: str | None = None
     smtp_port: int | None = None
     smtp_user: str | None = None

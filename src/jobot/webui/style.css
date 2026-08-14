@@ -196,6 +196,9 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 .applied-row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .applied-row .c { color: var(--text2); flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .applied-row .d { color: var(--mid); flex: none; font-size: 13px; }
+.applied-row .links { flex: none; display: flex; gap: 16px; }
+.applied-row .links a { color: var(--text2); font-size: 13px; text-decoration: none; }
+.applied-row .links a:hover { color: var(--white); }
 
 /* ---- Modal ---- */
 .overlay {
@@ -214,6 +217,17 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 .mailbody { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 20px; white-space: pre-wrap; margin: 24px 0 32px; max-height: 260px; overflow-y: auto; color: var(--text2); }
 .modal .row { display: flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap; }
 .modal .note { color: var(--warning); font-size: 13px; margin-bottom: 24px; }
+
+/* ---- Dossier de candidature : les 3 gestes a faire, dans l'ordre ---- */
+.kit-steps { border-top: 1px solid var(--border); }
+.kit-step { display: flex; gap: 20px; padding: 24px 0; border-bottom: 1px solid var(--border); }
+.kit-step .n {
+  flex: none; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600; color: var(--text2);
+}
+.kit-step b { display: block; font-size: 15px; font-weight: 600; }
+.kit-step small { display: block; color: var(--text2); font-size: 13px; line-height: 20px; margin-top: 6px; }
 
 textarea {
   width: 100%; min-height: 180px; background: var(--bg); color: var(--white);

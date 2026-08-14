@@ -17,7 +17,7 @@ from .cv import (
     load_master_cv,
     save_master_cv,
 )
-from .assist import apply_url, clipboard_fields, open_application_page
+from .letter import LetterDraft, suspect_terms
 from .llm import LLMError, build_client
 from .mailer import build_message, build_subject, send_message
 from .models import Channel, Status
@@ -110,10 +110,12 @@ def fetch(
         return
 
     conn = db.connect(settings.db_path)
-    new, updated, unchanged = db.upsert_offers(conn, offers, raws)
+    new, updated, unchanged, cross = db.upsert_offers(conn, offers, raws)
     console.print(
         f"Base : [green]{new} nouvelles[/green], "
-        f"[yellow]{updated} mises a jour[/yellow], {unchanged} inchangees."
+        f"[yellow]{updated} mises a jour[/yellow], {unchanged} inchangees"
+        + (f", {cross} doublons inter-sources" if cross else "")
+        + "."
     )
     pipeline.apply_filters(conn, params.rules(), _console_log)
     conn.close()
@@ -260,7 +262,7 @@ def review(
     conn.close()
     console.print(f"[green]{kept} gardee(s)[/green], [red]{skipped} ecartee(s)[/red].")
     if kept:
-        console.print("[dim]Suite : jobot send (canal email) / jobot assist <id> (canal form)[/dim]")
+        console.print("[dim]Suite : jobot send (canal email) / jobot kit <id> (canal site)[/dim]")
 
 
 @app.command()
@@ -346,10 +348,13 @@ def send(
 
 
 @app.command()
-def assist(offer_id: str) -> None:
-    """Ouvre le formulaire de candidature dans un navigateur, CV genere a cote.
+def kit(offer_id: str) -> None:
+    """Prepare le dossier d'une offre : CV adapte, lettre, et lien pour postuler.
 
-    L'envoi final reste un clic humain : jobot ne soumet jamais le formulaire.
+    jobot ne remplit aucun formulaire de candidature — chaque plateforme de
+    recrutement a le sien. Il produit les deux PDF et donne l'adresse ou les
+    deposer ; c'est le candidat qui depose, puis qui confirme avec
+    `jobot postule <id>`.
     """
     try:
         settings.require_master_cv()
@@ -362,13 +367,8 @@ def assist(offer_id: str) -> None:
     _require_scored(row, offer_id)
 
     offer = pipeline.offer_from_row(row)
-    url = apply_url(offer)
-    if not url:
-        console.print(f"[red]Aucune URL de candidature pour {offer_id}.[/red]")
-        conn.close()
-        raise typer.Exit(1)
-
     cv = load_master_cv(settings.cv_path)
+
     try:
         _, pdf_path = pipeline.build_cv_files(row, cv, settings.out_dir)
     except Exception as exc:  # noqa: BLE001 - message lisible plutot qu'une trace
@@ -376,28 +376,61 @@ def assist(offer_id: str) -> None:
         conn.close()
         raise typer.Exit(1)
 
-    console.print(f"[bold]{offer.title}[/bold] — {offer.company or '—'}\n")
-    table = Table(show_header=False, box=None, padding=(0, 2))
-    for label, value in clipboard_fields(cv, pdf_path):
-        table.add_row(f"[dim]{label}[/dim]", value)
-    console.print(table)
-    console.print(f"\n[dim]Ouverture de {url}[/dim]")
-    console.print("[yellow]Remplis et envoie toi-meme, puis ferme le navigateur.[/yellow]\n")
-
+    letter_path = None
+    flagged: list[str] = []
     try:
-        open_application_page(url, settings.chrome_profile)
-    except Exception as exc:  # noqa: BLE001 - message lisible plutot qu'une trace
-        console.print(f"[red]Ouverture du navigateur en echec : {exc}[/red]")
-        console.print("[dim]Navigateur installe ? uv run playwright install chromium[/dim]")
+        if not row["letter"]:
+            client = build_client(settings)
+            pipeline.draft_letter(conn, row, cv, client=client)
+            row = conn.execute(
+                "SELECT * FROM offers WHERE id = ?", (offer_id,)
+            ).fetchone()
+        _, letter_path = pipeline.build_letter_files(row, cv, settings.out_dir)
+        flagged = suspect_terms(
+            LetterDraft.model_validate_json(row["letter"]).text(), offer, cv
+        )
+    except Exception as exc:  # noqa: BLE001 - la lettre est optionnelle
+        console.print(f"[yellow]Lettre non generee : {exc}[/yellow]")
+
+    console.print(f"\n[bold]{offer.title}[/bold] — {offer.company or '—'}\n")
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_row("[dim]CV[/dim]", str(pdf_path.resolve()))
+    if letter_path:
+        table.add_row("[dim]Lettre[/dim]", str(letter_path.resolve()))
+    if offer.apply_email:
+        table.add_row("[dim]Candidature[/dim]", f"par email → {offer.apply_email}")
+    elif offer.apply_link:
+        table.add_row("[dim]Deposer sur[/dim]", offer.apply_link)
+    console.print(table)
+
+    if flagged:
+        console.print(
+            "\n[yellow]A relire dans la lettre[/yellow] — termes absents de ton CV "
+            f"et de l'annonce : {', '.join(flagged[:12])}"
+        )
+
+    console.print(f"\n[dim]Une fois deposee : jobot postule {offer_id}[/dim]")
+    conn.close()
+
+
+@app.command()
+def postule(offer_id: str) -> None:
+    """Marque une offre comme candidatee, apres un depot fait a la main."""
+    conn = db.connect(settings.db_path)
+    row = conn.execute("SELECT * FROM offers WHERE id = ?", (offer_id,)).fetchone()
+    if row is None:
+        console.print(f"[red]Aucune offre avec l'id '{offer_id}'.[/red]")
         conn.close()
         raise typer.Exit(1)
+    if row["status"] == str(Status.APPLIED):
+        console.print("[dim]Deja marquee comme envoyee.[/dim]")
+        conn.close()
+        return
 
-    if typer.confirm("Candidature envoyee ?", default=False):
-        db.mark_applied(conn, offer.id)
-        conn.commit()
-        console.print("[green]Marquee comme envoyee.[/green]")
-    else:
-        console.print(f"[dim]Laissee en '{row['status']}'.[/dim]")
+    db.mark_applied(conn, offer_id)
+    conn.commit()
+    conn.close()
+    console.print(f"[green]Marquee comme envoyee[/green] — {row['title'][:60]}")
     conn.close()
 
 

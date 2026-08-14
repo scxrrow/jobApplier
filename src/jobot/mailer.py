@@ -34,7 +34,12 @@ def build_body(cv: MasterCV, offer: Offer) -> str:
 
 
 def build_message(
-    *, settings: Settings, cv: MasterCV, offer: Offer, pdf_path: Path
+    *,
+    settings: Settings,
+    cv: MasterCV,
+    offer: Offer,
+    pdf_path: Path,
+    letter_path: Path | None = None,
 ) -> EmailMessage:
     if not offer.apply_email:
         raise ValueError(f"L'offre {offer.id} n'a pas d'adresse de candidature.")
@@ -46,13 +51,18 @@ def build_message(
     msg["Subject"] = build_subject(offer)
     msg.set_content(build_body(cv, offer))
 
-    filename = f"CV-{_ascii_filename(cv.personal.name)}.pdf"
-    msg.add_attachment(
-        pdf_path.read_bytes(),
-        maintype="application",
-        subtype="pdf",
-        filename=filename,
-    )
+    who = _ascii_filename(cv.personal.name)
+    attachments = [(pdf_path, f"CV-{who}.pdf")]
+    if letter_path is not None:
+        attachments.append((letter_path, f"Lettre-de-motivation-{who}.pdf"))
+
+    for path, filename in attachments:
+        msg.add_attachment(
+            path.read_bytes(),
+            maintype="application",
+            subtype="pdf",
+            filename=filename,
+        )
     return msg
 
 

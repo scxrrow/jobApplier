@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .cv import Experience, MasterCV, Project, SkillCategory
+from .models import Offer
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
+
+MONTHS_FR = (
+    "janvier", "février", "mars", "avril", "mai", "juin",
+    "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+)
 
 _env = Environment(
     loader=FileSystemLoader(TEMPLATE_DIR),
@@ -65,6 +72,25 @@ def render_html(cv: MasterCV, selected_ids: list[str]) -> str:
         skill_categories=_filter_skills(cv, selected),
         experiences=_filter_experiences(cv, selected),
         projects=_filter_projects(cv, selected),
+    )
+
+
+def _french_date(day: date) -> str:
+    return f"{day.day} {MONTHS_FR[day.month - 1]} {day.year}"
+
+
+def render_letter_html(cv: MasterCV, offer: Offer, paragraphs: list[str]) -> str:
+    """Habille les paragraphes generes d'une lettre complete.
+
+    Tout ce qui n'est pas dans `paragraphs` (en-tete, objet, formules) vient du
+    template : voir letter.py pour le raisonnement.
+    """
+    template = _env.get_template("letter.html.jinja")
+    return template.render(
+        cv=cv,
+        offer=offer,
+        paragraphs=paragraphs,
+        today=_french_date(date.today()),
     )
 
 

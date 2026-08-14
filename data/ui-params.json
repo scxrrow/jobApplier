@@ -1,24 +1,26 @@
 {
   "departements": [
-    "37",
-    "35",
-    "75"
+    "75",
+    "35"
   ],
   "contrat": "alternance",
   "postes": [
     "technicien support",
     "administrateur réseau",
-    "cybersécurité"
+    "cybersécurité",
+    "devops",
+    "secops",
+    "cloudops"
   ],
   "domaines": [],
   "mots_cles": [],
   "jours": 31,
   "sources": [
     "francetravail",
-    "apec"
+    "apec",
+    "labonnealternance"
   ],
   "validation_humaine": true,
-  "form_auto": true,
   "score_min": 50,
   "limite_score": 100,
   "max_par_requete": 600

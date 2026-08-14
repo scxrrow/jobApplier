@@ -209,6 +209,15 @@ reformuler la tache, pas contourner la regle.
   revanche etre affiche (`checkVisibility()` sur le parent) : sans ce garde-fou,
   jobot joint le CV a un formulaire d'un ecran encore cache et croit tenir le
   bon formulaire sans avoir clique "Postuler".
+- **Un mur de connexion se remplit tres bien** : la detection ne peut pas
+  rester conditionnee a l'echec du remplissage. Sur une page "Connexion /
+  Création", `_FIELD_PATTERNS` reconnait les champs email et les remplit —
+  jobot croyait alors tenir le formulaire de candidature, cliquait un bouton
+  de cette page et annoncait la candidature envoyee (constate : `filled`
+  contenant quatre fois `email`, `notes` vide). D'ou `_has_password_field`,
+  evalue AVANT tout remplissage et de nouveau avant de conclure a l'envoi : un
+  champ mot de passe visible se suffit a lui-meme, contrairement aux libelles
+  de `_looks_like_login` qui restent, eux, des signaux faibles.
 - **Mur de connexion : pause, jamais abandon** : `auto_apply` detecte
   l'authentification requise (`_looks_like_login`, applique seulement si le
   remplissage a echoue — un lien "Connexion" en en-tete ne suffit pas), signale
@@ -252,3 +261,11 @@ reformuler la tache, pas contourner la regle.
 Fais confiance au code. Le README peut avoir ete ecrit ou edite par une
 session anterieure ; le code est la verite. Si tu corriges une divergence,
 mets aussi ce skill a jour si l'invariant ou le piege qu'il decrit a change.
+
+## Tests
+
+`.venv/bin/python tests/test_autofill.py` — script autonome (ni pytest ni
+dependance en plus), 8 parcours reproduits en local avec Playwright headless.
+**A lancer apres toute modification d'`autofill.py`** : chacun de ces cas
+correspond a un faux "candidature envoyee" reellement survenu, et rien d'autre
+ne les rattrape.
