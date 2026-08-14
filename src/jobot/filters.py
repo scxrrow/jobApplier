@@ -74,6 +74,42 @@ class FilterRules:
     exclude: list[str] = field(default_factory=lambda: list(DEFAULT_EXCLUDE))
     min_description_chars: int = MIN_DESCRIPTION_CHARS
 
+    def keyword_matches(self, offer: Offer, title: str, haystack: str) -> bool:
+        """Un mot-cle decrit-il le METIER de l'offre ?
+
+        La regle tient en une phrase : **le titre doit porter au moins un mot du
+        mot-cle**. Chercher le mot-cle n'importe ou dans l'annonce ne marche
+        pas, parce que la description presente aussi l'employeur — « cybersecurite »
+        apparait dans une offre de charge de developpement RH des que la boite est
+        une ESN qui se decrit comme telle. C'est exactement ainsi que des offres
+        sans aucun rapport avec le CV arrivaient jusqu'au scoring, et donc
+        jusqu'au quota LLM.
+
+        Les mots restants peuvent, eux, venir de la description : « administrateur
+        reseau » doit continuer de reconnaitre « Administrateur systemes et
+        reseaux informatique », dont le titre ne porte pas les deux mots cote a
+        cote. L'ancrage porte sur un mot, pas sur la locution entiere.
+
+        Sur une description tronquee (APEC), le titre decide seul. C'est la
+        version juste de l'ancienne regle « pas de filtrage mots-cles sur les
+        extraits » : ce qui est tronque, c'est le texte de l'annonce, jamais son
+        intitule. Ne rien filtrer du tout laissait passer *toutes* les offres
+        APEC, y compris assistant tresorier et gestion locative.
+        """
+        for keyword in self.mots_cles:
+            folded = normalize(keyword).strip()
+            if not folded:
+                continue
+            # Un mot-cle entierement fait de mots courts ('SOC') reste utilisable
+            # tel quel plutot que de se retrouver sans aucun token.
+            tokens = [t for t in folded.split() if len(t) > 2] or [folded]
+            if not any(t in title for t in tokens):
+                continue
+            if offer.has_full_description and not all(t in haystack for t in tokens):
+                continue
+            return True
+        return False
+
     def check(self, offer: Offer) -> str | None:
         """Retourne None si l'offre passe, sinon la raison du rejet."""
         title = normalize(offer.title)
@@ -96,13 +132,8 @@ class FilterRules:
             if normalize(term) in title:
                 return f"titre exclu ({term})"
 
-        # Quand la source ne renvoie qu'un extrait de l'annonce, chercher les
-        # mots-cles dedans rejetterait des offres que la source a pourtant
-        # trouvees en cherchant, elle, dans le texte complet.
-        if self.mots_cles and offer.has_full_description:
-            hits = [k for k in self.mots_cles if normalize(k) in haystack]
-            if not hits:
-                return "aucun mot-cle metier"
+        if self.mots_cles and not self.keyword_matches(offer, title, haystack):
+            return "aucun mot-cle dans l'intitule"
 
         if offer.channel == "unknown":
             return "aucun canal de candidature"

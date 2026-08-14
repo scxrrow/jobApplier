@@ -163,8 +163,26 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 .stat .value { font-size: 36px; line-height: 44px; font-weight: 300; }
 .stat .name { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text2); margin-top: 4px; }
 
+/* ---- Offer toolbar (tri / filtre) ---- */
+.offer-toolbar {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 24px 48px;
+  margin-top: 48px; padding-bottom: 24px; border-bottom: 1px solid var(--border);
+}
+.filter-group { display: flex; flex-direction: column; gap: 12px; }
+.filter-group.sort { margin-left: auto; }
+.filter-label { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text2); }
+.offer-toolbar select { min-width: 280px; }
+.chip .count { margin-left: 8px; opacity: .55; font-variant-numeric: tabular-nums; }
+.offer-count { margin-top: 24px; font-size: 13px; color: var(--mid); font-variant-numeric: tabular-nums; }
+@media (max-width: 800px) {
+  .filter-group.sort { margin-left: 0; width: 100%; }
+  .offer-toolbar select { min-width: 0; width: 100%; }
+}
+
 /* ---- Offer cards ---- */
 .offer-list { display: flex; flex-direction: column; gap: 24px; margin-top: 48px; }
+/* La barre de tri fournit deja la respiration au-dessus de la liste. */
+#offer-list { margin-top: 24px; }
 .offer { display: flex; gap: 32px; align-items: flex-start; }
 .offer:hover { border-color: var(--mid); }
 .offer .score { flex: none; width: 96px; text-align: center; }

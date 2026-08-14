@@ -102,11 +102,21 @@ reformuler la tache, pas contourner la regle.
 6. **Le filtrage a regles tourne avant le LLM, jamais apres.** Objectif :
    economiser les appels API. Ne pas deplacer cette logique en aval "pour
    simplifier le flux".
-7. **Offres a description tronquee (APEC) : pas de filtrage par mots-cles
-   sur le texte.** L'API APEC a deja cherche server-side sur le mot-cle ;
-   re-filtrer client-side sur un extrait de ~280 caracteres rejetterait des
-   offres pertinentes a tort. Voir `Offer.has_full_description` et son usage
-   dans `filters.py::FilterRules.check`.
+7. **Le filtrage par mots-cles s'ancre sur l'intitule, jamais sur la seule
+   description.** Un mot-cle ne compte que si le titre de l'offre porte au
+   moins un de ses mots ; les mots restants peuvent venir de la description
+   (« administrateur reseau » doit reconnaitre « Administrateur systemes et
+   reseaux »). Sur une description tronquee (APEC), le titre decide seul : ce
+   qui est tronque, c'est le texte de l'annonce, jamais son intitule. Voir
+   `filters.py::FilterRules.keyword_matches`.
+   *Regle precedente, a ne pas retablir* : « pas de filtrage mots-cles du tout
+   sur les descriptions tronquees ». Elle laissait passer **toutes** les offres
+   APEC vers le scoring (assistant tresorier, gestion locative, chargee de
+   developpement RH pour un profil informatique). Et chercher le mot-cle
+   n'importe ou dans une description complete laissait passer les offres RH
+   des ESN, dont la plaquette employeur contient « cybersecurite » et
+   « devops ». Mesure sur la base : 237 -> 168 offres atteignant le LLM, sans
+   perdre une seule offre notee >= 85.
 
 ## Pieges deja rencontres (evite de les reintroduire)
 
@@ -231,12 +241,50 @@ reformuler la tache, pas contourner la regle.
   impossible. `origineOffre.partenaires[].url` contient le lien direct (present
   sur 100 % des offres partenaires observees). `parse_offer` le prefere donc a
   `urlOrigine` ; ne pas revenir en arriere en "simplifiant" le parsing.
+- **URL d'offre APEC : le segment `/emploi` est une route, pas un ornement** :
+  `apec.fr` est une application Angular ; `detail-offre/{numero}` est une route
+  **enfant** de `recherche-emploi.html/emploi`. Ecrite sans ce segment, l'URL
+  n'est reconnue par aucune route : le routeur retombe sur la route par defaut
+  et **reecrit la barre d'adresse** en `/candidat/recherche-emploi.html/` —
+  numero perdu, page vide, aucun message d'erreur. Symptome vecu : survol de
+  « Ouvrir l'offre » affichant bien l'URL avec le numero, mais onglet ouvert
+  sur une page blanche sans offre, donc candidature impossible. Le diagnostic
+  spontane (« il faudrait etre connecte a son compte APEC ») est faux : aucune
+  authentification n'est en jeu. Verification faite en relevant les `href` que
+  la page de recherche d'apec.fr genere elle-meme — c'est la seule source de
+  verite pour cette forme d'URL, le JSON de `rechercheOffre` ne contient aucun
+  champ d'URL. Deux signes distinguent les deux formes en cas de doute : la
+  bonne conserve l'URL demandee et monte le composant de detail (il repond, y
+  compris pour dire « offre plus disponible ») ; la mauvaise redirige
+  silencieusement. Ne pas « simplifier » l'URL en retirant `/emploi`.
 - **`contact.courriel` peut ne pas etre une adresse** : France Travail y met
   parfois une phrase ("Pour postuler, utiliser le lien suivant : https://...").
   Sans validation, ces offres partaient sur le canal email et un `send
   --envoyer` aurait tente un envoi SMTP vers cette chaine. `clean_email()`
   filtre sur une vraie regex d'adresse ; volontairement strict (une adresse
   noyee dans une phrase est rejetee plutot qu'extraite au jugé).
+- **La Bonne Alternance ne cherche pas en plein texte — il faut passer par le
+  ROME** : c'est le piege majeur de cette source, et il a produit le symptome
+  « le site affiche 17 offres pour technicien support, jobot n'en a que 2 ».
+  Balayer un departement puis filtrer les mots-cles en local ne donne quasiment
+  pas le meme ensemble que le site officiel, qui traduit d'abord l'intitule en
+  codes ROME avant d'interroger la **meme** API. Mesure : 102 offres sous les
+  ROME de « technicien support », dont **99 jamais vues par jobot**. La
+  traduction se fait via le service d'auto-completion metier du site
+  (`METIER_URL`, public, sans cle) — surtout ne pas coder la table en dur, ce
+  service *est* la definition de ce que le site entend par un intitule.
+  Le balayage departemental est conserve en complement, pas en remplacement.
+- **La Bonne Alternance plafonne a 450 offres, sans pagination** : mesure, non
+  documente, et invisible — la reponse est simplement tronquee. Une requete par
+  departement renvoyait donc une tranche arbitraire, et des offres bien reelles
+  n'apparaissaient jamais dans jobot. Symptome vecu : 450 offres pour Paris,
+  450 pour trois departements reunis, et **450 sans aucun filtre** — c'est ce
+  dernier chiffre qui trahit le plafond. La parade est de partitionner par
+  `target_diploma_level` (seul axe disponible sans rapport avec le metier) et
+  de reunir les tranches : 371 -> 570 offres uniques sur Paris. Le pool est
+  mis en cache par departement, parce que l'API ignore les mots-cles : sans ca,
+  six intitules de poste declenchaient six fois exactement la meme requete.
+  Ne pas « simplifier » en revenant a un GET unique par departement.
 - **Corrections de parsing retroactives** : le JSON brut de chaque offre est
   conserve en colonne `raw`. `pipeline.reparse_routing()` (expose par `jobot
   reparse`, et appele au debut de chaque run UI) re-route les offres deja en

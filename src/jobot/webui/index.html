@@ -149,6 +149,17 @@
       Les offres avec une adresse de contact partent par email d'ici ; pour les
       autres, récupère les deux PDF et dépose-les sur le site de l'offre.
     </p>
+    <div class="offer-toolbar hidden" id="offer-toolbar">
+      <div class="filter-group">
+        <span class="filter-label">Job board</span>
+        <div class="chips" id="offer-source-chips"></div>
+      </div>
+      <div class="filter-group sort">
+        <label class="filter-label" for="offer-sort">Trier par</label>
+        <select id="offer-sort"></select>
+      </div>
+    </div>
+    <div class="offer-count hidden" id="offer-count"></div>
     <div class="offer-list" id="offer-list"></div>
     <div class="empty hidden" id="offer-empty">Aucun dossier en attente. Lance une recherche ci-dessus.</div>
   </div>
@@ -365,6 +376,9 @@ const state = {
   lastLogCount: -1,
   kitOffer: null,
   applyOffer: null,
+  offers: [],
+  offerHidden: new Set(),
+  offerSort: "score-desc",
 };
 
 function toast(msg, kind = "info") {
@@ -675,20 +689,110 @@ function offerCard(o) {
   </div>`;
 }
 
-async function refreshOffers() {
-  const pending = await api("/api/offers?statuts=scored,queued&limite=200");
+/* Tri et filtrage se font cote client, sur la liste deja chargee : elle est
+   plafonnee a 200 offres, et refaire la requete a chaque clic couterait un
+   aller-retour pour un travail que le navigateur fait instantanement.
+   `web.py` garde donc une seule route de liste, et l'ordre qu'elle renvoie
+   (score decroissant) reste le tri par defaut ici. */
 
-  $("validate-section").classList.remove("hidden");
-  $("offer-list").innerHTML = pending.map(offerCard).join("");
-  $("offer-empty").classList.toggle("hidden", pending.length > 0);
+const scoreOf = (o) => o.score ?? -1;
 
-  for (const btn of document.querySelectorAll("[data-act]")) {
+// Les valeurs absentes passent en fin de liste quel que soit le sens du tri :
+// une offre sans entreprise ne doit pas ouvrir un classement alphabetique.
+function cmpText(x, y) {
+  const a = (x || "").trim();
+  const b = (y || "").trim();
+  if (!a !== !b) return a ? -1 : 1;
+  return a.localeCompare(b, "fr", { sensitivity: "base" });
+}
+
+const OFFER_SORTS = [
+  { id: "score-desc", label: "Score — meilleur d'abord", cmp: (a, b) => scoreOf(b) - scoreOf(a) },
+  { id: "score-asc", label: "Score — plus faible d'abord", cmp: (a, b) => scoreOf(a) - scoreOf(b) },
+  { id: "date-desc", label: "Publication — plus récentes", cmp: (a, b) => cmpText(b.published_at, a.published_at) },
+  { id: "company-asc", label: "Entreprise — A → Z", cmp: (a, b) => cmpText(a.company, b.company) },
+  { id: "title-asc", label: "Intitulé — A → Z", cmp: (a, b) => cmpText(a.title, b.title) },
+];
+
+function sourceLabel(id) {
+  return SOURCE_LABELS[id] || id;
+}
+
+/* Le filtre retient les sources *masquees*, pas les sources visibles : une
+   source qui apparait apres coup (nouvelle recherche, nouveau job board)
+   s'affiche alors par defaut au lieu d'etre invisible sans que rien ne
+   l'indique. */
+function visibleOffers() {
+  const sort = OFFER_SORTS.find((s) => s.id === state.offerSort) || OFFER_SORTS[0];
+  return state.offers
+    .filter((o) => !state.offerHidden.has(o.source))
+    .sort((a, b) => sort.cmp(a, b) || scoreOf(b) - scoreOf(a));
+}
+
+function renderOfferFilters() {
+  const counts = new Map();
+  for (const o of state.offers) counts.set(o.source, (counts.get(o.source) || 0) + 1);
+
+  const box = $("offer-source-chips");
+  box.innerHTML = "";
+  const sources = [...counts.keys()].sort((a, b) => cmpText(sourceLabel(a), sourceLabel(b)));
+  for (const src of sources) {
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "chip" + (state.offerHidden.has(src) ? "" : " selected");
+    el.innerHTML = `${esc(sourceLabel(src))}<span class="count">${counts.get(src)}</span>`;
+    el.onclick = () => {
+      if (state.offerHidden.has(src)) state.offerHidden.delete(src);
+      else state.offerHidden.add(src);
+      renderOffers();
+    };
+    box.appendChild(el);
+  }
+  // Un seul job board dans les resultats : le filtre n'aurait rien a filtrer.
+  $("offer-toolbar").classList.toggle("hidden", state.offers.length === 0);
+}
+
+function renderOffers() {
+  renderOfferFilters();
+
+  const list = visibleOffers();
+  const total = state.offers.length;
+  $("offer-list").innerHTML = list.map(offerCard).join("");
+
+  const count = $("offer-count");
+  count.textContent = list.length === total
+    ? `${total} offre${total > 1 ? "s" : ""}`
+    : `${list.length} offre${list.length > 1 ? "s" : ""} sur ${total}`;
+  count.classList.toggle("hidden", total === 0);
+
+  const empty = $("offer-empty");
+  empty.textContent = total === 0
+    ? "Aucun dossier en attente. Lance une recherche ci-dessus."
+    : "Aucune offre pour ce job board. Réactive un filtre ci-dessus.";
+  empty.classList.toggle("hidden", list.length > 0);
+
+  for (const btn of $("offer-list").querySelectorAll("[data-act]")) {
     const id = btn.dataset.id;
     if (btn.dataset.act === "apply") btn.onclick = () => openApplyModal(id);
     if (btn.dataset.act === "kit") btn.onclick = () => openKit(id);
     if (btn.dataset.act === "skip") btn.onclick = () => skipOffer(id);
     if (btn.dataset.act === "toggle-desc") btn.onclick = (e) => { e.preventDefault(); toggleDesc(id); };
   }
+}
+
+function setupOfferControls() {
+  const sel = $("offer-sort");
+  sel.innerHTML = OFFER_SORTS
+    .map((s) => `<option value="${esc(s.id)}">${esc(s.label)}</option>`)
+    .join("");
+  sel.value = state.offerSort;
+  sel.onchange = () => { state.offerSort = sel.value; renderOffers(); };
+}
+
+async function refreshOffers() {
+  state.offers = await api("/api/offers?statuts=scored,queued&limite=200");
+  $("validate-section").classList.remove("hidden");
+  renderOffers();
 }
 
 async function toggleDesc(id) {
@@ -1030,6 +1134,7 @@ async function init() {
   if (!state.meta.llm_ok) {
     toast("LLM non configuré (JOBOT_LLM_*) : le scoring échouera. Voir .env.", "error");
   }
+  setupOfferControls();
   await refreshOffers();
   poll(true);
 }

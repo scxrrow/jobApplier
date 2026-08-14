@@ -44,6 +44,11 @@ toucher au terminal une fois lancée :
 3. **Lance.** Tout s'enchaîne automatiquement : récupération, filtrage,
    scoring LLM, génération des CV adaptés — jusqu'à l'écran de validation.
 4. **Récupère tes dossiers.** Chaque offre a son CV adapté et sa lettre.
+   - *Trier et filtrer* : au-dessus de la liste, une puce par job board
+     présent dans les résultats (avec son nombre d'offres) masque ou réaffiche
+     la source d'un clic, et le menu **Trier par** réordonne par score, par
+     date de publication, par entreprise ou par intitulé. Tout se fait
+     instantanément côté navigateur, sans relancer de recherche.
    - *Canal email* : tu vois le destinataire, l'objet, le corps et les pièces
      jointes avant de confirmer l'envoi, qui part depuis jobot.
    - *Canal site* : « Ouvrir le dossier » affiche les deux PDF, le texte de la
@@ -72,7 +77,10 @@ fetch → filtre → score → [TOI : review] → generate → send / [TOI : dé
 1. **`fetch`** — récupère les offres depuis France Travail, l'APEC et La Bonne
    Alternance, et écarte les doublons entre sources.
 2. **filtre** — élimine les offres hors périmètre (département, mots-clés,
-   type de contrat) avant de payer le moindre appel LLM.
+   type de contrat) avant de payer le moindre appel LLM. Un mot-clé ne compte
+   que si **l'intitulé** de l'offre en porte au moins un mot : la description
+   présente aussi l'employeur, et « cybersécurité » y apparaît dans une offre
+   de chargé de développement RH dès que la boîte est une ESN spécialisée.
 3. **`score`** — un LLM note chaque offre restante par rapport à ton profil et
    choisit, dans ton CV, les éléments à mettre en avant.
 4. **`review`** — *toi seul* décides quelles offres notées passent à la suite.
@@ -350,9 +358,23 @@ jeton généré depuis ton profil, passé en `Authorization: Bearer`. Trois chos
   entreprises jugées susceptibles de recruter, sans annonce derrière). Seules
   les `jobs` sont retenues : les secondes n'ont ni intitulé ni description, et
   rempliraient la base d'offres fantômes que le scoring ne saurait pas évaluer.
-- Elle ne cherche pas en plein texte, seulement par code ROME. jobot cherche
-  par intitulé libre : le tri sur les mots-clés est donc fait localement, après
-  la requête.
+- **Elle ne cherche pas en plein texte, seulement par code ROME** — et c'est le
+  point à comprendre sur cette source. Balayer un département puis filtrer les
+  mots-clés localement ne donne presque pas les mêmes offres que le site
+  officiel : lui traduit d'abord l'intitulé cherché en codes ROME. Mesuré sur
+  « technicien support » : 102 offres sous les codes ROME correspondants, dont
+  **99 que jobot n'avait jamais vues**. jobot interroge donc le même service
+  d'auto-complétion métier que le site (`METIER_URL`) pour convertir chaque
+  intitulé en codes ROME, puis réunit ces résultats avec le balayage
+  départemental. Aucune table codée en dur : le référentiel reste celui de La
+  Bonne Alternance.
+- **Elle plafonne toute réponse à 450 offres et n'offre aucune pagination.**
+  Interroger un département renvoyait donc une tranche arbitraire, et les
+  offres au-delà étaient invisibles. jobot interroge maintenant chaque niveau
+  de diplôme séparément et réunit les résultats, ce qui découpe la réponse en
+  tranches qui tiennent sous le plafond. Comme l'API ignore de toute façon les
+  mots-clés, le résultat est mis en cache pour la durée de la recherche : six
+  intitulés de poste ne déclenchent plus six fois la même requête.
 
 ### L'APEC
 
@@ -367,10 +389,11 @@ endpoints du site lui-même. Trois conséquences à connaître :
   par la recherche.** Le scoring travaille sur ce résumé et le sait (il lui est
   précisé de ne pas pénaliser l'offre pour ce qui manque) ; le texte complet
   reste à un clic, sur la page de l'offre.
-- Comme la description est partielle, le filtre par mots-clés n'est pas
-  réappliqué localement à ces offres — l'APEC a déjà cherché, elle, dans le
-  texte entier. Les rejeter sur un extrait tronqué écarterait des offres
-  pertinentes (`Offer.has_full_description`, testé dans `filters.py`).
+- Comme la description est partielle, le filtre par mots-clés ne s'applique
+  qu'à **l'intitulé** de ces offres, jamais à leur texte : l'extrait est
+  tronqué, l'intitulé ne l'est pas (`Offer.has_full_description`, testé dans
+  `filters.py`). Ne rien filtrer du tout laissait passer *toutes* les offres
+  APEC vers le scoring, y compris assistant trésorier ou gestion locative.
 
 Ces endpoints n'étant pas contractuels, ils peuvent changer sans préavis :
 une source qui échoue affiche un avertissement, les autres continuent.
@@ -451,7 +474,7 @@ Dans l'ordre où les données y circulent :
   pour qu'un passage en multi-utilisateur soit une migration de données plutôt
   qu'une réécriture des requêtes.
 
-## Limites connues et pistes
+## Limites connues, pistes et Bugs
 
 - Les offres APEC n'ont qu'une description tronquée (voir *Les sources
   d'offres*), ce qui rend leur scoring moins fin que celui des offres France
@@ -463,3 +486,17 @@ Dans l'ordre où les données y circulent :
 - Prochaines sources naturelles : les job boards ATS (Greenhouse, Lever,
   Ashby, SmartRecruiters, Workable, Recruitee) publient tous un JSON public
   sans authentification — il ne manque qu'une liste d'entreprises à parcourir.
+- **La Bonne Alternance plafonne ses réponses à 450 offres, sans pagination**
+  (voir `RESULT_CAP`). Contourné en partitionnant par niveau de diplôme, mais
+  pas complètement : la tranche « niveau 5 » atteint elle-même le plafond sur
+  Paris. La recherche par code ROME (voir *Les sources d'offres*) compense
+  l'essentiel, puisqu'elle ne dépend plus du balayage départemental.
+- Le nombre d'appels à La Bonne Alternance croît en départements × intitulés
+  (≈ 50 pour 4 départements et 6 postes, contre une limite de 60/min).
+  `_throttle` attend au lieu de prendre un 429, mais une recherche très large
+  finira par être lente de ce seul fait.
+- Les offres déjà scorées ne repassent jamais par les filtres : `reset_filtered`
+  ne réexamine que les `filtered_out`, à dessein (une décision humaine ou un
+  score ne doivent pas être annulés par un changement de critères). Après un
+  durcissement des règles, les offres hors-sujet déjà scorées restent donc
+  visibles jusqu'à ce qu'on les écarte à la main.

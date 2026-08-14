@@ -27,7 +27,12 @@ from ..models import Offer
 
 PRIME_URL = "https://www.apec.fr/candidat/recherche-emploi.html/emploi"
 SEARCH_URL = "https://www.apec.fr/cms/webservices/rechercheOffre"
-OFFER_URL = "https://www.apec.fr/candidat/recherche-emploi.html/detail-offre/{numero}"
+# Le segment `/emploi` n'est pas decoratif : c'est la route Angular parente de
+# `detail-offre`. Sans lui, le routeur ne reconnait pas l'URL, retombe sur la
+# route par defaut et remplace l'adresse par `/candidat/recherche-emploi.html/`
+# — numero d'offre perdu, page vide, candidature impossible. Verifie sur les
+# liens que la page de recherche d'apec.fr genere elle-meme.
+OFFER_URL = "https://www.apec.fr/candidat/recherche-emploi.html/emploi/detail-offre/{numero}"
 
 # `range` est plafonne a 100 : au-dela l'API retombe silencieusement sur 20.
 PAGE_SIZE = 100
